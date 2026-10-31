@@ -1,0 +1,15 @@
+# Rust build output
+/target/
+
+# Editor and OS temporary files
+*.swp
+*~
+.DS_Store
+
+# Logs
+*.log
+
+# Local-only files for agents and scratch work (not published)
+/CLAUDE.md
+/tmp/
+/.claude/settings.local.json
