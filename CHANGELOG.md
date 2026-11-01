@@ -7,6 +7,8 @@ include breaking changes).
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-11-02
+
 ### Added
 - The flyout slides in from the nearest edge of the screen while it fades
   in, and back out while it fades out. `timing.animation = "fade"` (or
@@ -40,5 +42,6 @@ The first release, for Windows 11.
 - English and Japanese.
 - `flexflyout --demo` shows sample tracks.
 
-[Unreleased]: https://github.com/akivajp/flexflyout/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/akivajp/flexflyout/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/akivajp/flexflyout/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/akivajp/flexflyout/releases/tag/v0.1.0
