@@ -7,7 +7,7 @@ use std::time::{Duration, Instant};
 
 use flexflyout_core::{Cover, NowPlaying, PlaybackStatus, RepeatMode, Timeline, Volume};
 
-use crate::app::{Message, Trigger};
+use crate::message::{Message, Trigger};
 
 /// Time between two appearances. Longer than one appearance (about 3.6 s
 /// with the default timing), so that every one starts from a hidden window.

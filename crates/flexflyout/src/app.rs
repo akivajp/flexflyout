@@ -11,14 +11,15 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use eframe::egui;
 use flexflyout_core::config::{Animation, Display, Monitor, NativeOsd};
 use flexflyout_core::layout::{self, MonitorArea, PixelRect};
-use flexflyout_core::{Command, Config, FlyoutTimer, NowPlaying, PlaybackStatus, Volume};
-use flexflyout_ui::{BASE_SIZE, FlyoutView, Labels};
+use flexflyout_core::{Command, Config};
+use flexflyout_ui::{BASE_SIZE, Labels};
 
+use crate::flyout::{FlyoutState, Received};
 use crate::i18n::TrayLabels;
 use crate::platform::windows::keys::{self, Key};
 use crate::platform::windows::media::{self, Change, Media};
@@ -30,68 +31,7 @@ use crate::platform::windows::{autostart, monitor, native_osd};
 /// Distance kept from the Windows volume indicator, in pixels at 100%.
 const NATIVE_OSD_GAP: f32 = 12.0;
 
-/// How often to check whether the mouse pointer still rests on the shown
-/// flyout (which keeps it from fading out).
-const HOVER_CHECK: Duration = Duration::from_millis(200);
-
-/// How often the shown flyout is drawn again while a track plays, to move
-/// its position bar on.
-const POSITION_REFRESH: Duration = Duration::from_millis(250);
-
-/// What the sources send to the window.
-#[derive(Debug)]
-pub enum Message {
-    /// The current track changed or was updated (`None`: nothing playing).
-    NowPlaying(Option<NowPlaying>),
-    /// The volume changed or was read for the first time.
-    Volume(Volume),
-    /// Show the flyout with what it has.
-    Show {
-        /// Why.
-        trigger: Trigger,
-        /// When the message was sent, to log how long showing took.
-        sent: Instant,
-    },
-    /// Use new settings (the file was saved). The flyout is shown with
-    /// them, so that a change of the placement or the look can be seen.
-    Settings {
-        /// The settings read from the file.
-        config: Box<Config>,
-        /// The texts again, when the language changed.
-        labels: Option<Labels>,
-    },
-    /// Close the app (Quit in the tray menu, or the end of the demo).
-    Quit,
-}
-
-/// Why the flyout is shown (for the log).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Trigger {
-    /// A volume key was pressed.
-    VolumeKey,
-    /// A media key was pressed.
-    MediaKey,
-    /// The volume changed, or another output device became the default.
-    VolumeChange,
-    /// A different track started.
-    TrackChange,
-    /// The player started or paused.
-    PlayPause,
-    /// The tray icon was clicked.
-    Tray,
-    /// The demo.
-    Demo,
-}
-
-impl Message {
-    /// A [`Message::Show`] sent now.
-    fn show(trigger: Trigger) -> Self {
-        Self::Show {
-            trigger,
-            sent: Instant::now(),
-        }
-    }
-}
+pub use crate::message::{Message, Trigger};
 
 /// Options of the Windows host.
 #[derive(Clone, Debug)]
@@ -236,15 +176,8 @@ struct Controls {
 
 /// State of the flyout window.
 struct FlyoutApp {
-    labels: Labels,
-    config: Config,
-    now_playing: Option<NowPlaying>,
-    volume: Option<Volume>,
-    timer: FlyoutTimer,
-    /// Whether the user pinned the flyout: it then stays until unpinned.
-    pinned: bool,
-    /// When the user last moved the position with the flyout's bar.
-    seeked: Option<Instant>,
+    /// What is shown, and the appearance's timer.
+    state: FlyoutState,
     messages: Receiver<Message>,
     /// `None` in the demo, where the controls change the flyout only.
     controls: Option<Controls>,
@@ -335,13 +268,7 @@ impl FlyoutApp {
         };
 
         Ok(Self {
-            labels,
-            timer: FlyoutTimer::new(config.timing.timing()),
-            config,
-            now_playing: None,
-            volume: None,
-            pinned: false,
-            seeked: None,
+            state: FlyoutState::new(labels, config),
             messages,
             controls,
             window,
@@ -382,7 +309,7 @@ impl FlyoutApp {
             };
             match placement.animation {
                 Animation::Slide => {
-                    let fraction = layout::slide_fraction(self.timer.opacity(now));
+                    let fraction = layout::slide_fraction(self.state.timer.opacity(now));
                     layout::slide(rect, placement.display.anchor, fraction)
                 }
                 Animation::Fade => rect,
@@ -537,35 +464,27 @@ impl eframe::App for FlyoutApp {
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         let now = Instant::now();
         while let Ok(message) = self.messages.try_recv() {
-            match message {
-                Message::NowPlaying(now_playing) => self.set_now_playing(now_playing),
-                Message::Volume(volume) => self.volume = Some(volume),
-                Message::Show { trigger, sent } => {
-                    self.timer.trigger(now);
+            match self.state.receive(message, now) {
+                Received::Content => {}
+                Received::Shown { trigger, sent } => {
                     self.pending = Some((trigger, sent));
                     self.cleared = false;
                     if self.show_via_egui {
                         ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
                     }
                 }
-                Message::Settings { config, labels } => {
-                    if config.general.native_osd != self.config.general.native_osd {
+                Received::Settings(old) => {
+                    let config = &self.state.config;
+                    if config.general.native_osd != old.general.native_osd {
                         native_osd::set_mode(config.general.native_osd);
                     }
-                    self.timer.set_timing(config.timing.timing());
                     ctx.set_zoom_factor(config.display.scale);
-                    self.config = *config;
-                    if let Some(labels) = labels {
-                        self.labels = labels;
-                    }
-                    // Show the flyout with the new settings.
-                    self.timer.trigger(now);
                     self.cleared = false;
                     if self.show_via_egui {
                         ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
                     }
                 }
-                Message::Quit => {
+                Received::Quit => {
                     log::info!("closing");
                     ctx.send_viewport_cmd(egui::ViewportCommand::Close);
                 }
@@ -576,23 +495,12 @@ impl eframe::App for FlyoutApp {
             self.finish_move();
         }
         self.keep_in_place(now);
-        // A pinned flyout stays, and so does one under the mouse pointer
-        // (to reach its buttons).
-        if self.timer.is_active(now) {
-            if self.pinned {
-                self.timer.trigger(now);
-            } else if self.pointer_over() {
-                self.timer.trigger(now);
-                ctx.request_repaint_after(HOVER_CHECK);
-            }
-            if self.now_playing.as_ref().is_some_and(|track| {
-                track.status == PlaybackStatus::Playing && track.timeline.is_some()
-            }) {
-                ctx.request_repaint_after(POSITION_REFRESH);
-            }
+        let pointer_over = self.pointer_over();
+        if let Some(after) = self.state.keep_alive(now, pointer_over) {
+            ctx.request_repaint_after(after);
         }
 
-        match self.timer.next_change(now) {
+        match self.state.timer.next_change(now) {
             // Fading: every frame. Fully shown: when the fade-out starts.
             Some(after) => ctx.request_repaint_after(after),
             // Finished: hide once a blank frame is on the screen.
@@ -615,7 +523,7 @@ impl eframe::App for FlyoutApp {
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let now = Instant::now();
-        let opacity = self.timer.opacity(now);
+        let opacity = self.state.timer.opacity(now);
         if opacity <= 0.0 {
             // Draw nothing, then let `logic` hide the window. Ask for that
             // one more frame only once: eframe keeps calling this while the
@@ -635,14 +543,7 @@ impl eframe::App for FlyoutApp {
             );
         }
         ui.multiply_opacity(opacity);
-        let view = FlyoutView {
-            now_playing: self.now_playing.as_ref(),
-            volume: self.volume,
-            pinned: self.pinned,
-            now,
-            background_opacity: self.config.display.opacity,
-            labels: &self.labels,
-        };
+        let view = self.state.view(now);
         if let Some(command) = flexflyout_ui::draw(ui, &view) {
             self.carry_out(command, now, ui.ctx());
         }
@@ -650,22 +551,6 @@ impl eframe::App for FlyoutApp {
 }
 
 impl FlyoutApp {
-    /// Uses an update of the current track from the player.
-    fn set_now_playing(&mut self, mut new: Option<NowPlaying>) {
-        // A player that has not caught up with a seek yet (Media Player
-        // reports the position only every few seconds) still tells where
-        // it was before: keep the position the flyout moved to.
-        if let (Some(seeked), Some(old), Some(new)) = (self.seeked, &self.now_playing, &mut new)
-            && old.same_track(new)
-            && new
-                .timeline
-                .is_some_and(|timeline| timeline.updated < seeked)
-        {
-            new.timeline = old.timeline;
-        }
-        self.now_playing = new;
-    }
-
     /// The user dropped the window somewhere else: it stays there for this
     /// appearance, and from then on if the settings say so.
     fn finish_move(&mut self) {
@@ -681,22 +566,22 @@ impl FlyoutApp {
             "moved to {rect:?}; focus: \"{}\"",
             window::foreground_window_title()
         );
-        if !self.config.display.remember_drag {
+        if !self.state.config.display.remember_drag {
             return;
         }
         let display = layout::display_for(
             rect,
-            &self.config.display,
+            &self.state.config.display,
             &monitor::list(),
             monitor::cursor(),
         );
         let config = Config {
             display,
-            ..self.config.clone()
+            ..self.state.config.clone()
         };
         // The settings file is watched: the new place comes back as new
         // settings, like a change made in the settings window.
-        match config.save(&self.config_file, &self.config) {
+        match config.save(&self.config_file, &self.state.config) {
             Ok(()) => log::info!("remembered the place: {:?}", config.display),
             Err(err) => log::error!("cannot remember the place: {err}"),
         }
@@ -704,44 +589,19 @@ impl FlyoutApp {
 
     /// Carries out what the user did with the flyout's controls.
     fn carry_out(&mut self, command: Command, now: Instant, ctx: &egui::Context) {
-        log::info!("control: {command:?}");
-        if let Command::Seek(position) = command
-            && let Some(timeline) = self.now_playing.as_mut().and_then(|t| t.timeline.as_mut())
-        {
-            // Show the new position at once rather than when the player
-            // reports it.
-            timeline.position = position;
-            timeline.updated = now;
-            self.seeked = Some(now);
-        }
+        let demo = self.controls.is_none();
+        let Some(command) = self.state.carry_out(command, now, demo) else {
+            // Closing needs a frame to fade out on.
+            ctx.request_repaint();
+            return;
+        };
         match (command, &self.controls) {
-            (Command::Close, _) => {
-                self.pinned = false;
-                self.timer.cancel();
-                ctx.request_repaint();
-            }
             // Windows moves the window from here, until the button is
             // released (see `finish_move`).
             (Command::StartMove, _) => self.window.start_move(),
-            (Command::Pin(pinned), _) => {
-                self.pinned = pinned;
-                // Unpinned: the usual display time from now on.
-                self.timer.trigger(now);
-            }
             (Command::SetVolume(level), Some(controls)) => controls.volume.set_level(level),
             (Command::ToggleMute, Some(controls)) => controls.volume.toggle_mute(),
             (_, Some(controls)) => controls.media.command(command),
-            // The demo has no player and no device: show the change only.
-            (Command::SetVolume(level), None) => {
-                if let Some(volume) = &mut self.volume {
-                    volume.level = level;
-                }
-            }
-            (Command::ToggleMute, None) => {
-                if let Some(volume) = &mut self.volume {
-                    volume.muted = !volume.muted;
-                }
-            }
             (_, None) => {}
         }
     }
