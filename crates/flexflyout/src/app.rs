@@ -1,15 +1,16 @@
 //! The Windows host: an eframe window that draws the flyout and shows and
 //! hides itself following [`FlyoutTimer`].
 //!
-//! Sources (for now the demo and the settings file) run on their own
-//! threads. They send a [`Message`], place and show the window through Win32
-//! at once when there is something to show, and ask egui for a repaint; the
-//! app then picks the message up in [`eframe::App::logic`].
+//! Sources (the player through SMTC, the volume, the keys, the settings
+//! file, or the demo instead of the first three) run on their own threads.
+//! They send a [`Message`], place and show the window through Win32 at once
+//! when there is something to show, and ask egui for a repaint; the app then
+//! picks the message up in [`eframe::App::logic`].
 
 use std::path::PathBuf;
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use eframe::egui;
 use flexflyout_core::config::Display;
@@ -17,18 +18,26 @@ use flexflyout_core::layout::{self, PixelRect};
 use flexflyout_core::{Config, FlyoutTimer, NowPlaying, Volume};
 use flexflyout_ui::{BASE_SIZE, FlyoutView, Labels};
 
-use crate::platform::windows::monitor;
+use crate::platform::windows::keys::{self, Key};
+use crate::platform::windows::media::{self, Media};
 use crate::platform::windows::window::{self, FlyoutWindow};
+use crate::platform::windows::{monitor, volume};
+
+/// How often to check whether the mouse pointer still rests on the shown
+/// flyout (which keeps it from fading out).
+const HOVER_CHECK: Duration = Duration::from_millis(200);
 
 /// What the sources send to the window.
 #[derive(Debug)]
 pub enum Message {
-    /// Show the flyout with this content.
+    /// The current track changed or was updated (`None`: nothing playing).
+    NowPlaying(Option<NowPlaying>),
+    /// The volume changed or was read for the first time.
+    Volume(Volume),
+    /// Show the flyout with what it has.
     Show {
-        /// The current track, or `None` when nothing is playing.
-        now_playing: Option<NowPlaying>,
-        /// The current volume.
-        volume: Volume,
+        /// Why.
+        trigger: Trigger,
         /// When the message was sent, to log how long showing took.
         sent: Instant,
     },
@@ -44,6 +53,31 @@ pub enum Message {
     Quit,
 }
 
+/// Why the flyout is shown (for the log).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Trigger {
+    /// A volume key was pressed.
+    VolumeKey,
+    /// A media key was pressed.
+    MediaKey,
+    /// The volume changed.
+    VolumeChange,
+    /// A different track started.
+    TrackChange,
+    /// The demo.
+    Demo,
+}
+
+impl Message {
+    /// A [`Message::Show`] sent now.
+    fn show(trigger: Trigger) -> Self {
+        Self::Show {
+            trigger,
+            sent: Instant::now(),
+        }
+    }
+}
+
 /// Options of the Windows host.
 #[derive(Clone, Debug)]
 pub struct Options {
@@ -52,8 +86,9 @@ pub struct Options {
     /// The language given on the command line, which overrides the one in
     /// the settings.
     pub lang: Option<String>,
-    /// Number of demo appearances (0 = endless).
-    pub demo_cycles: u32,
+    /// Show the demo, this many times (0 = endless), instead of following
+    /// the system.
+    pub demo: Option<u32>,
     /// Show the window with egui's viewport command instead of Win32.
     pub show_via_egui: bool,
 }
@@ -139,12 +174,14 @@ struct FlyoutApp {
     volume: Option<Volume>,
     timer: FlyoutTimer,
     messages: Receiver<Message>,
+    /// The current player's buttons (`None` in the demo).
+    media: Option<Media>,
     window: FlyoutWindow,
     placement: SharedPlacement,
     show_via_egui: bool,
-    /// When the message that is being shown was sent, until the first frame
-    /// with it has been drawn (then the delay is logged).
-    pending_since: Option<Instant>,
+    /// Why and when the flyout was last asked to show, until the first
+    /// frame after that has been drawn (then the delay is logged).
+    pending: Option<(Trigger, Instant)>,
     /// Whether a fully transparent frame has been drawn since the timer
     /// ended. The window is hidden only then, so that showing it again does
     /// not briefly bring back the last picture.
@@ -192,7 +229,13 @@ impl FlyoutApp {
             move |message: Message| send(&sender, &ctx, raw, &placement, message, show_via_egui)
         };
         watch_settings(&options, &config, send.clone());
-        crate::demo::spawn(options.demo_cycles, send);
+        let media = match options.demo {
+            Some(cycles) => {
+                crate::demo::spawn(cycles, send);
+                None
+            }
+            None => Some(start_sources(send)),
+        };
 
         Ok(Self {
             labels,
@@ -201,16 +244,27 @@ impl FlyoutApp {
             now_playing: None,
             volume: None,
             messages,
+            media,
             window,
             placement,
             show_via_egui: options.show_via_egui,
-            pending_since: None,
+            pending: None,
             cleared: false,
         })
     }
 }
 
 impl FlyoutApp {
+    /// Whether the mouse pointer is on the shown flyout. Read from Windows
+    /// rather than from egui, which keeps the last position it saw when
+    /// the window was hidden under the pointer.
+    fn pointer_over(&self) -> bool {
+        self.window.is_visible()
+            && monitor::cursor()
+                .zip(self.window.rect())
+                .is_some_and(|(point, rect)| rect.contains(point))
+    }
+
     /// Puts a shown window back where it was placed. Moving the window to a
     /// monitor with another display scaling makes Windows and winit resize
     /// it for the new scaling, and they may move it as well; the rectangle
@@ -234,6 +288,31 @@ impl FlyoutApp {
             self.window.set_rect(wanted);
         }
     }
+}
+
+/// Starts following the player, the volume and the keys. Returns the
+/// player's buttons.
+fn start_sources(send: impl Fn(Message) + Clone + Send + Sync + 'static) -> Media {
+    let to_window = send.clone();
+    volume::spawn(move |volume, changed| {
+        to_window(Message::Volume(volume));
+        if changed {
+            to_window(Message::show(Trigger::VolumeChange));
+        }
+    });
+    let to_window = send.clone();
+    keys::spawn(move |key| {
+        to_window(Message::show(match key {
+            Key::Volume => Trigger::VolumeKey,
+            Key::Media => Trigger::MediaKey,
+        }));
+    });
+    media::spawn(move |now_playing, new_track| {
+        send(Message::NowPlaying(now_playing));
+        if new_track {
+            send(Message::show(Trigger::TrackChange));
+        }
+    })
 }
 
 /// Sends the settings to the window every time the file is saved, with the
@@ -284,7 +363,7 @@ fn send(
             placement.lock().display = config.display.clone();
             true
         }
-        Message::Quit => false,
+        Message::NowPlaying(_) | Message::Volume(_) | Message::Quit => false,
     };
     if sender.send(message).is_err() {
         return; // The window is closing.
@@ -307,15 +386,11 @@ impl eframe::App for FlyoutApp {
         let now = Instant::now();
         while let Ok(message) = self.messages.try_recv() {
             match message {
-                Message::Show {
-                    now_playing,
-                    volume,
-                    sent,
-                } => {
-                    self.now_playing = now_playing;
-                    self.volume = Some(volume);
+                Message::NowPlaying(now_playing) => self.now_playing = now_playing,
+                Message::Volume(volume) => self.volume = Some(volume),
+                Message::Show { trigger, sent } => {
                     self.timer.trigger(now);
-                    self.pending_since = Some(sent);
+                    self.pending = Some((trigger, sent));
                     self.cleared = false;
                     if self.show_via_egui {
                         ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
@@ -343,6 +418,11 @@ impl eframe::App for FlyoutApp {
         }
 
         self.keep_in_place();
+        // A flyout under the mouse pointer stays (to reach its buttons).
+        if self.timer.is_active(now) && self.pointer_over() {
+            self.timer.trigger(now);
+            ctx.request_repaint_after(HOVER_CHECK);
+        }
 
         match self.timer.next_change(now) {
             // Fading: every frame. Fully shown: when the fade-out starts.
@@ -367,14 +447,19 @@ impl eframe::App for FlyoutApp {
         let now = Instant::now();
         let opacity = self.timer.opacity(now);
         if opacity <= 0.0 {
-            // Draw nothing, then let `logic` hide the window.
-            self.cleared = true;
-            ui.ctx().request_repaint();
+            // Draw nothing, then let `logic` hide the window. Ask for that
+            // one more frame only once: eframe keeps calling this while the
+            // window is hidden, and asking every time would keep it drawing
+            // ten times a second.
+            if !self.cleared {
+                self.cleared = true;
+                ui.ctx().request_repaint();
+            }
             return;
         }
-        if let Some(sent) = self.pending_since.take() {
+        if let Some((trigger, sent)) = self.pending.take() {
             log::info!(
-                "drawing {:.1} ms after the message was sent; focus: \"{}\"",
+                "{trigger:?}: drawing {:.1} ms after the message was sent; focus: \"{}\"",
                 sent.elapsed().as_secs_f64() * 1000.0,
                 window::foreground_window_title()
             );
@@ -387,8 +472,10 @@ impl eframe::App for FlyoutApp {
             labels: &self.labels,
         };
         if let Some(command) = flexflyout_ui::draw(ui, &view) {
-            // Sent to the player once the SMTC backend exists.
             log::info!("button: {command:?}");
+            if let Some(media) = &self.media {
+                media.command(command);
+            }
         }
     }
 }

@@ -1,4 +1,8 @@
-//! Windows: the flyout window (and later SMTC, Core Audio and the keys).
+//! Windows: the flyout window, the monitors, and the sources (SMTC, Core
+//! Audio and the keys).
 
+pub mod keys;
+pub mod media;
 pub mod monitor;
+pub mod volume;
 pub mod window;

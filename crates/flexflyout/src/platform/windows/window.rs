@@ -12,16 +12,26 @@ use std::ffi::c_void;
 use anyhow::Context as _;
 use flexflyout_core::layout::PixelRect;
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
-use windows::Win32::Foundation::{HWND, RECT};
+use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, RECT, WPARAM};
 use windows::Win32::Graphics::Dwm::{DWMWA_BORDER_COLOR, DWMWA_COLOR_NONE, DwmSetWindowAttribute};
 use windows::Win32::Graphics::Gdi::{BLACK_BRUSH, GetStockObject};
+use windows::Win32::UI::Shell::{DefSubclassProc, SetWindowSubclass};
 use windows::Win32::UI::WindowsAndMessaging::{
     GCLP_HBRBACKGROUND, GWL_EXSTYLE, GetForegroundWindow, GetWindowLongPtrW, GetWindowRect,
-    GetWindowTextW, HWND_TOPMOST, IsWindowVisible, SET_WINDOW_POS_FLAGS, SW_HIDE,
-    SWP_ASYNCWINDOWPOS, SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER,
-    SWP_SHOWWINDOW, SetClassLongPtrW, SetWindowLongPtrW, SetWindowPos, ShowWindow, WS_EX_APPWINDOW,
+    GetWindowTextW, HWND_TOPMOST, IsWindowVisible, MA_NOACTIVATE, SET_WINDOW_POS_FLAGS,
+    STYLESTRUCT, SW_HIDE, SWP_ASYNCWINDOWPOS, SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE,
+    SWP_NOSIZE, SWP_NOZORDER, SWP_SHOWWINDOW, SetClassLongPtrW, SetWindowLongPtrW, SetWindowPos,
+    ShowWindow, WINDOW_EX_STYLE, WM_MOUSEACTIVATE, WM_MOUSEMOVE, WM_STYLECHANGING, WS_EX_APPWINDOW,
     WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
 };
+
+/// Sent when the pointer leaves a window that asked for it (the windows
+/// crate has it only with its large `Win32_UI_Controls` feature).
+const WM_MOUSELEAVE: u32 = 0x02A3;
+
+/// Extended styles the flyout always has: it never takes the focus, and a
+/// tool window has no taskbar button.
+const FLYOUT_EX_STYLE: WINDOW_EX_STYLE = WINDOW_EX_STYLE(WS_EX_NOACTIVATE.0 | WS_EX_TOOLWINDOW.0);
 
 /// The flyout's window, used from the UI thread.
 #[derive(Clone, Copy, Debug)]
@@ -47,13 +57,19 @@ impl FlyoutWindow {
     /// button and no Windows 11 border, and lets its background show through.
     pub fn apply_flyout_style(&self) -> anyhow::Result<()> {
         let hwnd = self.0;
-        // SAFETY: reads and writes attributes of our own, live window.
+        // SAFETY: reads and writes attributes of our own, live window; the
+        // subclass procedure is a valid function for the process lifetime.
         unsafe {
-            // No focus when shown or clicked; a tool window has no taskbar
-            // button. eframe adds WS_EX_APPWINDOW, which forces a button.
+            // winit rewrites the whole extended style whenever its own state
+            // of the window changes (e.g. when eframe first shows it), which
+            // would drop the styles below. The subclass puts them back on
+            // every change, and refuses activation by a click as well.
+            if !SetWindowSubclass(hwnd, Some(keep_flyout_styles), 1, 0).as_bool() {
+                log::warn!("cannot guard the window styles");
+            }
+            // eframe adds WS_EX_APPWINDOW, which forces a taskbar button.
             let ex = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
-            let ex = (ex | (WS_EX_NOACTIVATE.0 | WS_EX_TOOLWINDOW.0) as isize)
-                & !(WS_EX_APPWINDOW.0 as isize);
+            let ex = (ex | FLYOUT_EX_STYLE.0 as isize) & !(WS_EX_APPWINDOW.0 as isize);
             SetWindowLongPtrW(hwnd, GWL_EXSTYLE, ex);
             // Let GDI paint the window's surface black, which a transparent
             // window treats as see-through. Without it the parts egui leaves
@@ -114,6 +130,45 @@ impl FlyoutWindow {
         // previous visibility, not an error.
         let _ = unsafe { ShowWindow(self.0, SW_HIDE) };
     }
+}
+
+/// Subclass procedure of the flyout window, in front of winit's.
+unsafe extern "system" fn keep_flyout_styles(
+    hwnd: HWND,
+    message: u32,
+    wparam: WPARAM,
+    lparam: LPARAM,
+    _id: usize,
+    _data: usize,
+) -> LRESULT {
+    match message {
+        // A click must not activate the window (WS_EX_NOACTIVATE already
+        // says so; this holds even while the style is being changed).
+        WM_MOUSEACTIVATE => return LRESULT(MA_NOACTIVATE as isize),
+        WM_MOUSELEAVE => {
+            // winit (0.30.13) keeps the last pointer position when the
+            // pointer leaves, and reports a move only to a different
+            // position. egui forgets the position on leaving and ignores
+            // clicks while it has none. So a click on the very pixel where
+            // the pointer left (the same button again, or a flyout shown
+            // under a resting pointer) was lost. A move far outside makes
+            // winit forget the position; the leave that follows tells egui
+            // that the pointer is gone.
+            let outside = (i16::MIN as u16 as u32) | ((i16::MIN as u16 as u32) << 16);
+            // SAFETY: a mouse move with no buttons down, to winit's procedure.
+            unsafe { DefSubclassProc(hwnd, WM_MOUSEMOVE, WPARAM(0), LPARAM(outside as isize)) };
+        }
+        WM_STYLECHANGING if wparam.0 as i32 == GWL_EXSTYLE.0 => {
+            // SAFETY: for WM_STYLECHANGING, lparam points to the new styles,
+            // which may be changed before they are applied.
+            if let Some(styles) = unsafe { (lparam.0 as *mut STYLESTRUCT).as_mut() } {
+                styles.styleNew = (styles.styleNew | FLYOUT_EX_STYLE.0) & !WS_EX_APPWINDOW.0;
+            }
+        }
+        _ => {}
+    }
+    // SAFETY: passes the message on to winit's window procedure.
+    unsafe { DefSubclassProc(hwnd, message, wparam, lparam) }
 }
 
 /// Moves and resizes the window, puts it above the other always-on-top

@@ -2,7 +2,7 @@
 
 [日本語](README.ja.md)
 
-> **Early development.** Nothing is usable yet. The Windows version comes first; so far it only has a demo mode (`flexflyout --demo`) that shows sample tracks.
+> **Early development.** The Windows version comes first. It already follows the player, the volume and the volume keys, and reads its settings from `%APPDATA%\flexflyout\config.toml`, but has no tray icon yet (end it from the Task Manager). `flexflyout --demo` shows sample tracks instead.
 
 A flexible, cross-platform media flyout. When you change the volume or a new track starts, it pops up with what is playing — cover art, title and artist — along with playback controls and the volume level, then fades away.
 

@@ -805,6 +805,7 @@ dependencies = [
  "rust-embed",
  "simplelog",
  "windows",
+ "windows-core",
  "winit",
 ]
 

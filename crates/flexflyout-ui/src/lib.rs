@@ -7,11 +7,13 @@
 
 pub mod fonts;
 
+use std::sync::Arc;
+
 use egui::{
-    Align2, Color32, CornerRadius, FontId, Pos2, Rect, RichText, Role, Sense, Shape, Stroke, Ui,
-    WidgetInfo, pos2, vec2,
+    Align2, Color32, ColorImage, CornerRadius, FontId, Pos2, Rect, RichText, Role, Sense, Shape,
+    Stroke, TextureHandle, TextureOptions, Ui, WidgetInfo, pos2, vec2,
 };
-use flexflyout_core::{Command, NowPlaying, PlaybackStatus, Volume};
+use flexflyout_core::{Command, Cover, NowPlaying, PlaybackStatus, Volume};
 
 /// Size of the panel at scale 1.0, in egui points.
 pub const BASE_SIZE: egui::Vec2 = vec2(380.0, 128.0);
@@ -86,12 +88,15 @@ pub fn draw(ui: &mut Ui, view: &FlyoutView<'_>) -> Option<Command> {
         Color32::from_rgba_unmultiplied(BACKGROUND.r(), BACKGROUND.g(), BACKGROUND.b(), alpha);
     painter.rect_filled(rect, CornerRadius::same(14), background);
 
-    // Square cover art on the left, as tall as the content area.
-    // Real cover art comes with the SMTC backend; until then a placeholder.
+    // Square cover art on the left, as tall as the content area, or a
+    // placeholder when the player gives none.
     let side = rect.height() - 2.0 * MARGIN;
     let cover = Rect::from_min_size(rect.min + vec2(MARGIN, MARGIN), vec2(side, side));
-    painter.rect_filled(cover, CornerRadius::same(8), COVER_PLACEHOLDER);
-    paint_note(&painter, cover.center(), side * 0.4, SECONDARY_TEXT);
+    let art = view.now_playing.and_then(|track| track.cover.as_ref());
+    if !art.is_some_and(|art| paint_cover(ui, art, cover)) {
+        painter.rect_filled(cover, CornerRadius::same(8), COVER_PLACEHOLDER);
+        paint_note(&painter, cover.center(), side * 0.4, SECONDARY_TEXT);
+    }
 
     // Text and controls to the right of the cover art.
     let left = cover.right() + GAP;
@@ -200,6 +205,47 @@ pub fn draw(ui: &mut Ui, view: &FlyoutView<'_>) -> Option<Command> {
     }
 
     command
+}
+
+/// Draws the cover art into `rect`, cropped to a square around its center
+/// (video thumbnails are wide) and with rounded corners. Returns `false`
+/// for pixels that do not match the stated size, which are not drawn.
+///
+/// The texture is uploaded once per cover and kept in egui's memory with
+/// the cover it was made from.
+fn paint_cover(ui: &Ui, art: &Arc<Cover>, rect: Rect) -> bool {
+    let (width, height) = (art.width as usize, art.height as usize);
+    if width == 0 || height == 0 || art.rgba.len() != width * height * 4 {
+        return false;
+    }
+    let id = egui::Id::unique("flexflyout-cover");
+    let cached: Option<(Arc<Cover>, TextureHandle)> = ui.data(|data| data.get_temp(id));
+    let texture = match cached {
+        // Holding the Arc keeps its address from being reused by a new
+        // cover, so comparing pointers is enough.
+        Some((cover, texture)) if Arc::ptr_eq(&cover, art) => texture,
+        _ => {
+            let image = ColorImage::from_rgba_premultiplied([width, height], &art.rgba);
+            let texture = ui
+                .ctx()
+                .load_texture("cover", image, TextureOptions::LINEAR);
+            ui.data_mut(|data| data.insert_temp(id, (Arc::clone(art), texture.clone())));
+            texture
+        }
+    };
+    let (w, h) = (width as f32, height as f32);
+    let uv = if w > h {
+        let margin = (1.0 - h / w) / 2.0;
+        Rect::from_min_max(pos2(margin, 0.0), pos2(1.0 - margin, 1.0))
+    } else {
+        let margin = (1.0 - w / h) / 2.0;
+        Rect::from_min_max(pos2(0.0, margin), pos2(1.0, 1.0 - margin))
+    };
+    egui::Image::from_texture(&texture)
+        .uv(uv)
+        .corner_radius(8)
+        .paint_at(ui, rect);
+    true
 }
 
 /// Adds `widget` at the left edge of `rect`, vertically centered
@@ -326,6 +372,7 @@ mod tests {
             title: "Title".into(),
             artist: "Artist".into(),
             status: PlaybackStatus::Playing,
+            cover: None,
         };
         let labels = labels();
         let mut harness = harness(&track, &labels);
@@ -347,10 +394,35 @@ mod tests {
             title: "Title".into(),
             artist: "Artist".into(),
             status: PlaybackStatus::Paused,
+            cover: None,
         };
         let labels = labels();
         let harness = harness(&track, &labels);
         harness.get_by_label("Title");
         harness.get_by_label("Artist");
+    }
+
+    #[test]
+    fn cover_art_is_drawn_or_replaced_when_broken() {
+        let labels = labels();
+        // A wide 4 × 2 image (cropped to a square) and one whose pixels do
+        // not match its size: neither may panic.
+        for rgba_len in [4 * 2 * 4, 5] {
+            let track = NowPlaying {
+                title: "Title".into(),
+                cover: Some(Arc::new(Cover {
+                    width: 4,
+                    height: 2,
+                    rgba: vec![255; rgba_len],
+                })),
+                ..NowPlaying::default()
+            };
+            let mut harness = harness(&track, &labels);
+            harness.run();
+            let textures = harness.ctx.tex_manager().read().num_allocated();
+            // The font atlas, plus the cover when it is valid.
+            let expected = if rgba_len == 32 { 2 } else { 1 };
+            assert_eq!(textures, expected, "pixels: {rgba_len}");
+        }
     }
 }

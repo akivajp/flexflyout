@@ -3,8 +3,8 @@
 //! Shows what is playing (cover art, title, artist) with playback controls
 //! and the volume when the volume changes or a new track starts.
 //!
-//! Only the Windows host exists so far, and only its demo mode (`--demo`),
-//! which shows a sample track every few seconds without reading the system.
+//! Only the Windows host exists so far. `--demo` shows sample tracks every
+//! few seconds instead of following the system.
 
 // Release builds on Windows use the GUI subsystem (no console window).
 // `console::attach_parent` brings `--help` and errors back to a terminal.
@@ -95,16 +95,13 @@ fn run(cli: Cli) -> anyhow::Result<()> {
 
     #[cfg(windows)]
     {
-        if !cli.demo {
-            anyhow::bail!("only the demo mode is available yet: run with --demo");
-        }
         app::run(
             labels,
             config,
             app::Options {
                 config_file,
                 lang: cli.lang,
-                demo_cycles: cli.cycles,
+                demo: cli.demo.then_some(cli.cycles),
                 show_via_egui: cli.show_via_egui,
             },
         )

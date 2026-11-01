@@ -4,6 +4,9 @@
 //! (Windows with eframe now, KDE and GNOME later) shares the same model and
 //! the same timing rules, and so that they can be tested anywhere.
 
+use std::fmt;
+use std::sync::Arc;
+
 pub mod config;
 pub mod layout;
 mod timer;
@@ -32,6 +35,37 @@ pub struct NowPlaying {
     pub artist: String,
     /// Whether the track is playing or paused.
     pub status: PlaybackStatus,
+    /// Cover art, if the player provides one. Shared, because the pixels
+    /// travel from the media thread to the window with every update.
+    pub cover: Option<Arc<Cover>>,
+}
+
+impl NowPlaying {
+    /// Whether `other` is the same track (title and artist), whatever its
+    /// playback state and cover art: a different track is a reason to show
+    /// the flyout, a paused one or a late cover art is not.
+    pub fn same_track(&self, other: &NowPlaying) -> bool {
+        self.title == other.title && self.artist == other.artist
+    }
+}
+
+/// Cover art: RGBA pixels with premultiplied alpha, row by row, already
+/// scaled down to about the size it is shown at.
+#[derive(Clone, Default, PartialEq, Eq)]
+pub struct Cover {
+    /// Width in pixels.
+    pub width: u32,
+    /// Height in pixels.
+    pub height: u32,
+    /// `width * height * 4` bytes.
+    pub rgba: Vec<u8>,
+}
+
+impl fmt::Debug for Cover {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // The pixels would flood the log.
+        write!(f, "Cover({}x{})", self.width, self.height)
+    }
 }
 
 /// Volume of the default output device.

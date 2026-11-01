@@ -32,11 +32,25 @@ raw-window-handle = "0.6.2"
 # The same winit as eframe's, for Windows-only window settings that egui
 # does not expose (the drop shadow of undecorated windows).
 winit = { version = "0.30.13", default-features = false }
+# The COM classes made with `#[implement]` refer to windows-core by name.
+windows-core = "0.62"
 windows = { version = "0.62", features = [
+    "Foundation",
+    "Graphics_Imaging",
+    "Media_Control",
+    "Storage_Streams",
     "Win32_Foundation",
     "Win32_Graphics_Dwm",
     "Win32_Graphics_Gdi",
+    "Win32_Media_Audio",
+    "Win32_Media_Audio_Endpoints",
+    "Win32_System_Com",
+    "Win32_System_Com_StructuredStorage",
     "Win32_System_Console",
+    "Win32_System_LibraryLoader",
+    "Win32_System_Variant",
     "Win32_UI_HiDpi",
+    "Win32_UI_Input_KeyboardAndMouse",
+    "Win32_UI_Shell",
     "Win32_UI_WindowsAndMessaging",
 ] }
