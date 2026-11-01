@@ -1,5 +1,5 @@
 //! SMTC (System Media Transport Controls): what the current player plays,
-//! and the playback buttons.
+//! where it is in the track, and the playback controls.
 //!
 //! WinRT calls the event handlers on its own threads. They only post a
 //! request to the media thread, which does all the reading (title, artist,
@@ -9,11 +9,11 @@
 
 use std::sync::Arc;
 use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender, channel};
-use std::time::Duration;
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use anyhow::Context as _;
-use flexflyout_core::{Command, Cover, NowPlaying, PlaybackStatus};
-use windows::Foundation::TypedEventHandler;
+use flexflyout_core::{Command, Cover, NowPlaying, PlaybackStatus, RepeatMode, Timeline};
+use windows::Foundation::{DateTime, TypedEventHandler};
 use windows::Graphics::Imaging::{
     BitmapAlphaMode, BitmapDecoder, BitmapInterpolationMode, BitmapPixelFormat, BitmapTransform,
     ColorManagementMode, ExifOrientationMode,
@@ -21,8 +21,10 @@ use windows::Graphics::Imaging::{
 use windows::Media::Control::{
     GlobalSystemMediaTransportControlsSession as Session,
     GlobalSystemMediaTransportControlsSessionManager as SessionManager,
+    GlobalSystemMediaTransportControlsSessionPlaybackInfo as PlaybackInfo,
     GlobalSystemMediaTransportControlsSessionPlaybackStatus as SmtcStatus,
 };
+use windows::Media::MediaPlaybackAutoRepeatMode as SmtcRepeat;
 use windows::Storage::Streams::IRandomAccessStreamReference;
 use windows::Win32::System::Com::{COINIT_MULTITHREADED, CoInitializeEx};
 
@@ -34,9 +36,27 @@ const SETTLE: Duration = Duration::from_millis(120);
 /// scaling together).
 const MAX_COVER_SIDE: u32 = 320;
 
+/// WinRT times count 100 ns ticks; dates count them from 1601.
+const TICKS_PER_SECOND: i64 = 10_000_000;
+/// Seconds from 1601-01-01 to 1970-01-01 (the Unix epoch).
+const SECONDS_1601_TO_1970: i64 = 11_644_473_600;
+
 /// Receives the current track (`None` when no player reports one) and
-/// whether it is a different track than before (a reason to show).
-type Sink = Box<dyn Fn(Option<NowPlaying>, bool) + Send>;
+/// what changed.
+type Sink = Box<dyn Fn(Option<NowPlaying>, Change) + Send>;
+
+/// What changed in an update of the current track.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Change {
+    /// A different, named track (a reason to show the flyout).
+    NewTrack,
+    /// The same track started or paused (a reason to show, if the settings
+    /// say so).
+    PlayPause,
+    /// Anything else: the position, a late cover art, the repeat mode, the
+    /// player closing.
+    Other,
+}
 
 /// What the media thread is asked to do.
 #[derive(Debug)]
@@ -45,8 +65,12 @@ enum Request {
     SessionChanged,
     /// The track's title, artist or cover art changed.
     PropertiesChanged,
-    /// The player started, paused or stopped.
+    /// The player started, paused or stopped, or changed its repeat or
+    /// shuffle mode.
     PlaybackChanged,
+    /// The position in the track changed other than by playing on (a seek),
+    /// or the player reported it again.
+    TimelineChanged,
     /// A button of the flyout was clicked.
     Command(Command),
 }
@@ -65,7 +89,7 @@ impl Media {
 }
 
 /// Starts following the current player.
-pub fn spawn(sink: impl Fn(Option<NowPlaying>, bool) + Send + 'static) -> Media {
+pub fn spawn(sink: impl Fn(Option<NowPlaying>, Change) + Send + 'static) -> Media {
     let (requests, received) = channel();
     let media = Media {
         requests: requests.clone(),
@@ -89,6 +113,7 @@ struct Current {
     session: Session,
     properties_token: i64,
     playback_token: i64,
+    timeline_token: i64,
 }
 
 impl Drop for Current {
@@ -98,6 +123,9 @@ impl Drop for Current {
             .session
             .RemoveMediaPropertiesChanged(self.properties_token);
         let _ = self.session.RemovePlaybackInfoChanged(self.playback_token);
+        let _ = self
+            .session
+            .RemoveTimelinePropertiesChanged(self.timeline_token);
     }
 }
 
@@ -123,7 +151,7 @@ fn run(
     let mut current = subscribe(&manager, requests);
     let mut track = read_track(current.as_ref(), None);
     log::info!("now playing: {track:?}");
-    sink(track.clone(), false);
+    sink(track.clone(), Change::Other);
 
     loop {
         let Ok(first) = received.recv() else {
@@ -136,8 +164,14 @@ fn run(
             match request {
                 Request::SessionChanged => session = true,
                 Request::PropertiesChanged => properties = true,
-                Request::PlaybackChanged => playback = true,
-                Request::Command(command) => send_command(current.as_ref(), command),
+                Request::PlaybackChanged | Request::TimelineChanged => playback = true,
+                Request::Command(command) => {
+                    send_command(current.as_ref(), command);
+                    // Read the state back once the player has carried it
+                    // out: some players report neither a seek nor a new
+                    // repeat mode on their own.
+                    playback = true;
+                }
             }
             next = match received.recv_timeout(SETTLE) {
                 Ok(request) => Some(request),
@@ -152,7 +186,8 @@ fn run(
         let new = if session || properties {
             read_track(current.as_ref(), None)
         } else if playback {
-            // Only the state changed: keep the title and the cover art.
+            // Only the state or the position changed: keep the title and
+            // the cover art.
             read_track(current.as_ref(), track.as_ref())
         } else {
             continue; // Only commands.
@@ -160,17 +195,42 @@ fn run(
         if new == track {
             continue;
         }
-        // A different, named track is a reason to show the flyout; a
-        // pause, a late cover art or a player closing is not.
-        let new_track = new.as_ref().is_some_and(|new| {
-            !new.title.is_empty() && track.as_ref().is_none_or(|old| !old.same_track(new))
-        });
-        log::info!(
-            "now playing: {new:?}{}",
-            if new_track { " (new track)" } else { "" }
-        );
+        let change = match (&track, &new) {
+            (_, Some(new)) if new.title.is_empty() => Change::Other,
+            (Some(old), Some(new)) if old.same_track(new) => {
+                if old.status != new.status {
+                    Change::PlayPause
+                } else {
+                    Change::Other
+                }
+            }
+            (_, Some(_)) => Change::NewTrack,
+            (_, None) => Change::Other,
+        };
+        // The position changes on every seek and with some players every
+        // second: not worth a line of its own.
+        if change != Change::Other || !same_but_timeline(track.as_ref(), new.as_ref()) {
+            log::info!("now playing ({change:?}): {new:?}");
+        }
         track = new;
-        sink(track.clone(), new_track);
+        sink(track.clone(), change);
+    }
+}
+
+/// Whether the two differ in their timeline at most.
+fn same_but_timeline(old: Option<&NowPlaying>, new: Option<&NowPlaying>) -> bool {
+    match (old, new) {
+        (Some(old), Some(new)) => {
+            let old = NowPlaying {
+                timeline: None,
+                ..old.clone()
+            };
+            old == NowPlaying {
+                timeline: None,
+                ..new.clone()
+            }
+        }
+        (old, new) => old.is_none() && new.is_none(),
     }
 }
 
@@ -189,35 +249,134 @@ fn subscribe(manager: &SessionManager, requests: &Sender<Request>) -> Option<Cur
         let _ = sender.send(Request::PlaybackChanged);
         Ok(())
     }));
-    match (properties, playback) {
-        (Ok(properties_token), Ok(playback_token)) => Some(Current {
+    let sender = requests.clone();
+    let timeline = session.TimelinePropertiesChanged(&TypedEventHandler::new(move |_, _| {
+        let _ = sender.send(Request::TimelineChanged);
+        Ok(())
+    }));
+    match (properties, playback, timeline) {
+        (Ok(properties_token), Ok(playback_token), Ok(timeline_token)) => Some(Current {
             session,
             properties_token,
             playback_token,
+            timeline_token,
         }),
-        (properties, playback) => {
-            log::warn!("cannot follow {app}: {properties:?}, {playback:?}");
+        (properties, playback, timeline) => {
+            log::warn!("cannot follow {app}: {properties:?}, {playback:?}, {timeline:?}");
             None
         }
     }
 }
 
-/// Reads the current track. With `known`, only the playback state is read
-/// and the rest is copied from it.
-fn read_track(current: Option<&Current>, known: Option<&NowPlaying>) -> Option<NowPlaying> {
-    let session = &current?.session;
-    let status = session
-        .GetPlaybackInfo()
-        .and_then(|info| info.PlaybackStatus())
+/// The playback state, repeat mode and shuffle of the player.
+struct Playback {
+    status: PlaybackStatus,
+    repeat: Option<RepeatMode>,
+    shuffle: Option<bool>,
+    seekable: bool,
+}
+
+/// Reads the playback state; the repeat mode and shuffle only where the
+/// player can change them.
+fn read_playback(session: &Session) -> Playback {
+    let info: Option<PlaybackInfo> = session.GetPlaybackInfo().ok();
+    let status = info
+        .as_ref()
+        .and_then(|info| info.PlaybackStatus().ok())
         .map(|status| match status {
             SmtcStatus::Playing => PlaybackStatus::Playing,
             SmtcStatus::Paused => PlaybackStatus::Paused,
             _ => PlaybackStatus::Stopped,
         })
         .unwrap_or_default();
+    let controls = info.as_ref().and_then(|info| info.Controls().ok());
+    let enabled = |is_enabled: fn(&_) -> windows::core::Result<bool>| {
+        controls
+            .as_ref()
+            .is_some_and(|controls| is_enabled(controls).unwrap_or(false))
+    };
+    let repeat = enabled(|c| c.IsRepeatEnabled()).then(|| {
+        info.as_ref()
+            .and_then(|info| info.AutoRepeatMode().and_then(|mode| mode.Value()).ok())
+            .map_or(RepeatMode::Off, |mode| match mode {
+                SmtcRepeat::Track => RepeatMode::Track,
+                SmtcRepeat::List => RepeatMode::List,
+                _ => RepeatMode::Off,
+            })
+    });
+    let shuffle = enabled(|c| c.IsShuffleEnabled()).then(|| {
+        info.as_ref()
+            .and_then(|info| info.IsShuffleActive().and_then(|on| on.Value()).ok())
+            .unwrap_or(false)
+    });
+    Playback {
+        status,
+        repeat,
+        shuffle,
+        seekable: enabled(|c| c.IsPlaybackPositionEnabled()),
+    }
+}
+
+/// Reads the position and the length of the track, if the player tells
+/// them (a live stream has no length).
+fn read_timeline(session: &Session, seekable: bool) -> Option<Timeline> {
+    let timeline = session.GetTimelineProperties().ok()?;
+    let start = timeline.StartTime().ok()?.Duration;
+    let end = timeline.EndTime().ok()?.Duration;
+    let position = timeline.Position().ok()?.Duration;
+    if end <= start {
+        return None;
+    }
+    let length = duration_from_ticks(end - start);
+    // The player reports the position as of some moment, which can be a
+    // while ago; a date that makes no sense counts as now.
+    let now = Instant::now();
+    let updated = timeline
+        .LastUpdatedTime()
+        .ok()
+        .and_then(age)
+        .filter(|age| *age <= length)
+        .and_then(|age| now.checked_sub(age))
+        .unwrap_or(now);
+    Some(Timeline {
+        position: duration_from_ticks(position - start).min(length),
+        updated,
+        length,
+        seekable,
+    })
+}
+
+/// How long ago `date` was, or `None` if it is in the future.
+fn age(date: DateTime) -> Option<Duration> {
+    let since_1970 = SystemTime::now().duration_since(UNIX_EPOCH).ok()?;
+    let now = (since_1970.as_secs() as i64 + SECONDS_1601_TO_1970) * TICKS_PER_SECOND
+        + i64::from(since_1970.subsec_nanos() / 100);
+    let ticks = now - date.UniversalTime;
+    (ticks >= 0).then(|| duration_from_ticks(ticks))
+}
+
+/// A WinRT duration (100 ns ticks; negative counts as zero).
+fn duration_from_ticks(ticks: i64) -> Duration {
+    Duration::from_nanos(u64::try_from(ticks).unwrap_or(0).saturating_mul(100))
+}
+
+/// Reads the current track. With `known`, only the playback state and the
+/// position are read, and the title, artist and cover art are copied from it.
+fn read_track(current: Option<&Current>, known: Option<&NowPlaying>) -> Option<NowPlaying> {
+    let session = &current?.session;
+    let Playback {
+        status,
+        repeat,
+        shuffle,
+        seekable,
+    } = read_playback(session);
+    let timeline = read_timeline(session, seekable);
     if let Some(known) = known {
         return Some(NowPlaying {
             status,
+            timeline,
+            repeat,
+            shuffle,
             ..known.clone()
         });
     }
@@ -244,6 +403,9 @@ fn read_track(current: Option<&Current>, known: Option<&NowPlaying>) -> Option<N
         artist: text(properties.Artist()),
         status,
         cover: cover.map(Arc::new),
+        timeline,
+        repeat,
+        shuffle,
     })
 }
 
@@ -287,6 +449,25 @@ fn send_command(current: Option<&Current>, command: Command) {
         Command::Previous => session.TrySkipPreviousAsync(),
         Command::TogglePlayPause => session.TryTogglePlayPauseAsync(),
         Command::Next => session.TrySkipNextAsync(),
+        Command::Seek(position) => {
+            // Positions count from the timeline's start, which is usually 0.
+            let start = session
+                .GetTimelineProperties()
+                .and_then(|timeline| timeline.StartTime())
+                .map_or(0, |start| start.Duration);
+            let ticks = i64::try_from(position.as_nanos() / 100).unwrap_or(i64::MAX);
+            session.TryChangePlaybackPositionAsync(start.saturating_add(ticks))
+        }
+        Command::SetRepeat(mode) => session.TryChangeAutoRepeatModeAsync(match mode {
+            RepeatMode::Off => SmtcRepeat::None,
+            RepeatMode::Track => SmtcRepeat::Track,
+            RepeatMode::List => SmtcRepeat::List,
+        }),
+        Command::SetShuffle(on) => session.TryChangeShuffleActiveAsync(on),
+        Command::SetVolume(_) | Command::ToggleMute | Command::Pin(_) => {
+            log::warn!("{command:?} is not for the player");
+            return;
+        }
     };
     match operation.and_then(|operation| operation.join()) {
         Ok(true) => log::info!("sent {command:?} to the player"),

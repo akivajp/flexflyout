@@ -3,10 +3,11 @@
 //! A thread of its own binds to the default output device, reports its
 //! volume once, then forwards every change Windows notifies (from any app,
 //! a key or the taskbar). When the default device changes (headphones
-//! plugged in), it binds to the new one.
+//! plugged in), it binds to the new one. It also carries out the flyout's
+//! volume bar and mute button on the device it is bound to.
 
 use std::sync::Arc;
-use std::sync::mpsc::{Sender, channel};
+use std::sync::mpsc::{Receiver, Sender, channel};
 
 use anyhow::Context as _;
 use flexflyout_core::Volume;
@@ -23,27 +24,63 @@ use windows::Win32::System::Com::{
 };
 use windows::core::{PCWSTR, implement};
 
-/// Receives the volume: once when bound to a device (`changed` false),
-/// then on every change (`changed` true). Called from COM's threads.
+/// Receives the volume: once when bound to a device at the start
+/// (`changed` false), then on every change and when bound to another
+/// device (`changed` true). Called from COM's threads.
 type Sink = Arc<dyn Fn(Volume, bool) + Send + Sync>;
 
+/// What the volume thread is asked to do.
+#[derive(Debug)]
+enum Request {
+    /// The default output device changed.
+    DeviceChanged,
+    /// Set the volume (0.0 to 1.0).
+    SetLevel(f32),
+    /// Mute, or unmute.
+    ToggleMute,
+}
+
+/// Changes the volume of the default output device.
+#[derive(Clone, Debug)]
+pub struct VolumeControl {
+    requests: Sender<Request>,
+}
+
+impl VolumeControl {
+    /// Sets the volume (0.0 to 1.0).
+    pub fn set_level(&self, level: f32) {
+        let _ = self.requests.send(Request::SetLevel(level.clamp(0.0, 1.0)));
+    }
+
+    /// Mutes, or unmutes.
+    pub fn toggle_mute(&self) {
+        let _ = self.requests.send(Request::ToggleMute);
+    }
+}
+
 /// Starts watching the volume.
-pub fn spawn(sink: impl Fn(Volume, bool) + Send + Sync + 'static) {
+pub fn spawn(sink: impl Fn(Volume, bool) + Send + Sync + 'static) -> VolumeControl {
     let sink: Sink = Arc::new(sink);
+    let (requests, received) = channel();
+    let control = VolumeControl {
+        requests: requests.clone(),
+    };
     let spawned = std::thread::Builder::new()
         .name("volume".into())
         .spawn(move || {
-            if let Err(err) = run(sink) {
+            if let Err(err) = run(sink, requests, received) {
                 log::error!("the volume cannot be followed: {err:#}");
             }
         });
     if let Err(err) = spawned {
         log::error!("cannot start the volume thread: {err}");
     }
+    control
 }
 
-/// Binds to the default device, again after every change of it, forever.
-fn run(sink: Sink) -> anyhow::Result<()> {
+/// Binds to the default device, again after every change of it, and
+/// carries out the requests, forever.
+fn run(sink: Sink, requests: Sender<Request>, received: Receiver<Request>) -> anyhow::Result<()> {
     // SAFETY: initializes COM for this thread, which lives until the end.
     unsafe { CoInitializeEx(None, COINIT_MULTITHREADED) }
         .ok()
@@ -52,41 +89,77 @@ fn run(sink: Sink) -> anyhow::Result<()> {
     let enumerator: IMMDeviceEnumerator =
         unsafe { CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL) }
             .context("cannot list the audio devices")?;
-    let (device_changed, changes) = channel();
-    let watcher: IMMNotificationClient = DeviceWatcher { device_changed }.into();
+    let watcher: IMMNotificationClient = DeviceWatcher {
+        device_changed: requests,
+    }
+    .into();
     // SAFETY: `watcher` stays alive (and registered) as long as this thread.
     unsafe { enumerator.RegisterEndpointNotificationCallback(&watcher) }
         .context("cannot watch the default audio device")?;
 
+    // Kept alive until the next device change; dropping them stops the
+    // notifications for the old device. `None` while there is no output
+    // device at all, until one appears.
+    let mut bound = bind_or_log(&enumerator, &sink, false);
     loop {
-        // Kept alive until the next device change; dropping them stops the
-        // notifications for the old device.
-        let bound = match bind(&enumerator, &sink) {
-            Ok(bound) => Some(bound),
-            Err(err) => {
-                // No output device at all: wait until one appears.
-                log::warn!("no output device to follow: {err:#}");
-                None
-            }
-        };
-        if changes.recv().is_err() {
+        let Ok(request) = received.recv() else {
             return Ok(());
+        };
+        match request {
+            Request::DeviceChanged => {
+                if let Some((endpoint, callback)) = bound.take() {
+                    // SAFETY: unregisters the callback registered by `bind`.
+                    let _ = unsafe { endpoint.UnregisterControlChangeNotify(&callback) };
+                }
+                log::info!("the default output device changed");
+                // Show the new device's volume (another pair of headphones
+                // has a volume of its own).
+                bound = bind_or_log(&enumerator, &sink, true);
+            }
+            Request::SetLevel(level) => {
+                if let Some((endpoint, _)) = &bound {
+                    // SAFETY: a plain COM call on the bound device. Windows
+                    // reports the change through the callback.
+                    if let Err(err) =
+                        unsafe { endpoint.SetMasterVolumeLevelScalar(level, std::ptr::null()) }
+                    {
+                        log::warn!("cannot set the volume: {err}");
+                    }
+                }
+            }
+            Request::ToggleMute => {
+                if let Some((endpoint, _)) = &bound {
+                    // SAFETY: plain COM calls on the bound device.
+                    let result = unsafe {
+                        endpoint
+                            .GetMute()
+                            .and_then(|muted| endpoint.SetMute(!muted.as_bool(), std::ptr::null()))
+                    };
+                    if let Err(err) = result {
+                        log::warn!("cannot mute or unmute: {err}");
+                    }
+                }
+            }
         }
-        // Several notifications come for one change (one per role); the
-        // first is enough.
-        while changes.try_recv().is_ok() {}
-        if let Some((endpoint, callback)) = bound {
-            // SAFETY: unregisters the callback registered by `bind`.
-            let _ = unsafe { endpoint.UnregisterControlChangeNotify(&callback) };
-        }
-        log::info!("the default output device changed");
     }
+}
+
+/// [`bind`], with a failure logged.
+fn bind_or_log(
+    enumerator: &IMMDeviceEnumerator,
+    sink: &Sink,
+    changed: bool,
+) -> Option<(IAudioEndpointVolume, IAudioEndpointVolumeCallback)> {
+    bind(enumerator, sink, changed)
+        .inspect_err(|err| log::warn!("no output device to follow: {err:#}"))
+        .ok()
 }
 
 /// Starts following the default output device and reports its volume.
 fn bind(
     enumerator: &IMMDeviceEnumerator,
     sink: &Sink,
+    changed: bool,
 ) -> anyhow::Result<(IAudioEndpointVolume, IAudioEndpointVolumeCallback)> {
     // SAFETY: plain COM calls with valid arguments.
     unsafe {
@@ -108,7 +181,7 @@ fn bind(
             muted: endpoint.GetMute()?.as_bool(),
         };
         log::info!("output device volume: {volume:?}");
-        sink(volume, false);
+        sink(volume, changed);
         Ok((endpoint, callback))
     }
 }
@@ -138,7 +211,7 @@ impl IAudioEndpointVolumeCallback_Impl for VolumeCallback_Impl {
 /// Tells the volume thread when the default output device changes.
 #[implement(IMMNotificationClient)]
 struct DeviceWatcher {
-    device_changed: Sender<()>,
+    device_changed: Sender<Request>,
 }
 
 impl IMMNotificationClient_Impl for DeviceWatcher_Impl {
@@ -149,7 +222,7 @@ impl IMMNotificationClient_Impl for DeviceWatcher_Impl {
         _device_id: &PCWSTR,
     ) -> windows::core::Result<()> {
         if flow == eRender && role == eConsole {
-            let _ = self.device_changed.send(());
+            let _ = self.device_changed.send(Request::DeviceChanged);
         }
         Ok(())
     }

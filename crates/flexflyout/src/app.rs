@@ -8,6 +8,7 @@
 //! picks the message up in [`eframe::App::logic`].
 
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant};
@@ -15,15 +16,16 @@ use std::time::{Duration, Instant};
 use eframe::egui;
 use flexflyout_core::config::{Display, Monitor, NativeOsd};
 use flexflyout_core::layout::{self, MonitorArea, PixelRect};
-use flexflyout_core::{Config, FlyoutTimer, NowPlaying, Volume};
+use flexflyout_core::{Command, Config, FlyoutTimer, NowPlaying, PlaybackStatus, Volume};
 use flexflyout_ui::{BASE_SIZE, FlyoutView, Labels};
 
 use crate::i18n::TrayLabels;
 use crate::platform::windows::keys::{self, Key};
-use crate::platform::windows::media::{self, Media};
+use crate::platform::windows::media::{self, Change, Media};
 use crate::platform::windows::tray::{self, TrayCommand};
+use crate::platform::windows::volume::{self, VolumeControl};
 use crate::platform::windows::window::{self, FlyoutWindow};
-use crate::platform::windows::{monitor, native_osd, volume};
+use crate::platform::windows::{monitor, native_osd};
 
 /// Distance kept from the Windows volume indicator, in pixels at 100%.
 const NATIVE_OSD_GAP: f32 = 12.0;
@@ -31,6 +33,10 @@ const NATIVE_OSD_GAP: f32 = 12.0;
 /// How often to check whether the mouse pointer still rests on the shown
 /// flyout (which keeps it from fading out).
 const HOVER_CHECK: Duration = Duration::from_millis(200);
+
+/// How often the shown flyout is drawn again while a track plays, to move
+/// its position bar on.
+const POSITION_REFRESH: Duration = Duration::from_millis(250);
 
 /// What the sources send to the window.
 #[derive(Debug)]
@@ -65,10 +71,12 @@ pub enum Trigger {
     VolumeKey,
     /// A media key was pressed.
     MediaKey,
-    /// The volume changed.
+    /// The volume changed, or another output device became the default.
     VolumeChange,
     /// A different track started.
     TrackChange,
+    /// The player started or paused.
+    PlayPause,
     /// The tray icon was clicked.
     Tray,
     /// The demo.
@@ -207,6 +215,14 @@ fn avoid_native_osd(rect: PixelRect, monitor: &MonitorArea, monitors: &[MonitorA
     }
 }
 
+/// What the flyout's controls act on (not in the demo).
+struct Controls {
+    /// The current player.
+    media: Media,
+    /// The volume of the default output device.
+    volume: VolumeControl,
+}
+
 /// State of the flyout window.
 struct FlyoutApp {
     labels: Labels,
@@ -214,9 +230,13 @@ struct FlyoutApp {
     now_playing: Option<NowPlaying>,
     volume: Option<Volume>,
     timer: FlyoutTimer,
+    /// Whether the user pinned the flyout: it then stays until unpinned.
+    pinned: bool,
+    /// When the user last moved the position with the flyout's bar.
+    seeked: Option<Instant>,
     messages: Receiver<Message>,
-    /// The current player's buttons (`None` in the demo).
-    media: Option<Media>,
+    /// `None` in the demo, where the controls change the flyout only.
+    controls: Option<Controls>,
     window: FlyoutWindow,
     placement: SharedPlacement,
     show_via_egui: bool,
@@ -271,7 +291,9 @@ impl FlyoutApp {
             let placement = placement.clone();
             move |message: Message| send(&sender, &ctx, raw, &placement, message, show_via_egui)
         };
-        let reload = watch_settings(&options, &config, send.clone());
+        // Read by the player's thread, which decides whether to show.
+        let show_on_play_pause = Arc::new(AtomicBool::new(config.general.show_on_play_pause));
+        let reload = watch_settings(&options, &config, &show_on_play_pause, send.clone());
         let config_file = options.config_file.clone();
         let to_window = send.clone();
         tray::spawn(tray_labels, move |command| match command {
@@ -280,12 +302,12 @@ impl FlyoutApp {
             TrayCommand::ReloadSettings => reload.now(),
             TrayCommand::Quit => to_window(Message::Quit),
         });
-        let media = match options.demo {
+        let controls = match options.demo {
             Some(cycles) => {
                 crate::demo::spawn(cycles, send);
                 None
             }
-            None => Some(start_sources(send)),
+            None => Some(start_sources(send, show_on_play_pause)),
         };
 
         Ok(Self {
@@ -294,8 +316,10 @@ impl FlyoutApp {
             config,
             now_playing: None,
             volume: None,
+            pinned: false,
+            seeked: None,
             messages,
-            media,
+            controls,
             window,
             placement,
             show_via_egui: options.show_via_egui,
@@ -341,11 +365,14 @@ impl FlyoutApp {
     }
 }
 
-/// Starts following the player, the volume and the keys. Returns the
-/// player's buttons.
-fn start_sources(send: impl Fn(Message) + Clone + Send + Sync + 'static) -> Media {
+/// Starts following the player, the volume and the keys. Returns what the
+/// flyout's controls act on.
+fn start_sources(
+    send: impl Fn(Message) + Clone + Send + Sync + 'static,
+    show_on_play_pause: Arc<AtomicBool>,
+) -> Controls {
     let to_window = send.clone();
-    volume::spawn(move |volume, changed| {
+    let volume = volume::spawn(move |volume, changed| {
         to_window(Message::Volume(volume));
         if changed {
             to_window(Message::show(Trigger::VolumeChange));
@@ -358,12 +385,17 @@ fn start_sources(send: impl Fn(Message) + Clone + Send + Sync + 'static) -> Medi
             Key::Media => Trigger::MediaKey,
         }));
     });
-    media::spawn(move |now_playing, new_track| {
+    let media = media::spawn(move |now_playing, change| {
         send(Message::NowPlaying(now_playing));
-        if new_track {
-            send(Message::show(Trigger::TrackChange));
+        match change {
+            Change::NewTrack => send(Message::show(Trigger::TrackChange)),
+            Change::PlayPause if show_on_play_pause.load(Ordering::Relaxed) => {
+                send(Message::show(Trigger::PlayPause));
+            }
+            Change::PlayPause | Change::Other => {}
         }
-    })
+    });
+    Controls { media, volume }
 }
 
 /// Sends the settings to the window every time the file is saved, with the
@@ -372,11 +404,14 @@ fn start_sources(send: impl Fn(Message) + Clone + Send + Sync + 'static) -> Medi
 fn watch_settings(
     options: &Options,
     config: &Config,
+    show_on_play_pause: &Arc<AtomicBool>,
     send: impl Fn(Message) + Send + 'static,
 ) -> crate::settings::Reload {
     let lang = options.lang.clone();
     let mut language = crate::settings::language(lang.as_deref(), config);
+    let show_on_play_pause = Arc::clone(show_on_play_pause);
     crate::settings::watch(options.config_file.clone(), move |config| {
+        show_on_play_pause.store(config.general.show_on_play_pause, Ordering::Relaxed);
         let new_language = crate::settings::language(lang.as_deref(), &config);
         let labels = if new_language != language {
             // A bad language code keeps the texts in use.
@@ -447,7 +482,7 @@ impl eframe::App for FlyoutApp {
         let now = Instant::now();
         while let Ok(message) = self.messages.try_recv() {
             match message {
-                Message::NowPlaying(now_playing) => self.now_playing = now_playing,
+                Message::NowPlaying(now_playing) => self.set_now_playing(now_playing),
                 Message::Volume(volume) => self.volume = Some(volume),
                 Message::Show { trigger, sent } => {
                     self.timer.trigger(now);
@@ -482,10 +517,20 @@ impl eframe::App for FlyoutApp {
         }
 
         self.keep_in_place();
-        // A flyout under the mouse pointer stays (to reach its buttons).
-        if self.timer.is_active(now) && self.pointer_over() {
-            self.timer.trigger(now);
-            ctx.request_repaint_after(HOVER_CHECK);
+        // A pinned flyout stays, and so does one under the mouse pointer
+        // (to reach its buttons).
+        if self.timer.is_active(now) {
+            if self.pinned {
+                self.timer.trigger(now);
+            } else if self.pointer_over() {
+                self.timer.trigger(now);
+                ctx.request_repaint_after(HOVER_CHECK);
+            }
+            if self.now_playing.as_ref().is_some_and(|track| {
+                track.status == PlaybackStatus::Playing && track.timeline.is_some()
+            }) {
+                ctx.request_repaint_after(POSITION_REFRESH);
+            }
         }
 
         match self.timer.next_change(now) {
@@ -532,14 +577,67 @@ impl eframe::App for FlyoutApp {
         let view = FlyoutView {
             now_playing: self.now_playing.as_ref(),
             volume: self.volume,
+            pinned: self.pinned,
+            now,
             background_opacity: self.config.display.opacity,
             labels: &self.labels,
         };
         if let Some(command) = flexflyout_ui::draw(ui, &view) {
-            log::info!("button: {command:?}");
-            if let Some(media) = &self.media {
-                media.command(command);
+            self.carry_out(command, now);
+        }
+    }
+}
+
+impl FlyoutApp {
+    /// Uses an update of the current track from the player.
+    fn set_now_playing(&mut self, mut new: Option<NowPlaying>) {
+        // A player that has not caught up with a seek yet (Media Player
+        // reports the position only every few seconds) still tells where
+        // it was before: keep the position the flyout moved to.
+        if let (Some(seeked), Some(old), Some(new)) = (self.seeked, &self.now_playing, &mut new)
+            && old.same_track(new)
+            && new
+                .timeline
+                .is_some_and(|timeline| timeline.updated < seeked)
+        {
+            new.timeline = old.timeline;
+        }
+        self.now_playing = new;
+    }
+
+    /// Carries out what the user did with the flyout's controls.
+    fn carry_out(&mut self, command: Command, now: Instant) {
+        log::info!("control: {command:?}");
+        if let Command::Seek(position) = command
+            && let Some(timeline) = self.now_playing.as_mut().and_then(|t| t.timeline.as_mut())
+        {
+            // Show the new position at once rather than when the player
+            // reports it.
+            timeline.position = position;
+            timeline.updated = now;
+            self.seeked = Some(now);
+        }
+        match (command, &self.controls) {
+            (Command::Pin(pinned), _) => {
+                self.pinned = pinned;
+                // Unpinned: the usual display time from now on.
+                self.timer.trigger(now);
             }
+            (Command::SetVolume(level), Some(controls)) => controls.volume.set_level(level),
+            (Command::ToggleMute, Some(controls)) => controls.volume.toggle_mute(),
+            (_, Some(controls)) => controls.media.command(command),
+            // The demo has no player and no device: show the change only.
+            (Command::SetVolume(level), None) => {
+                if let Some(volume) = &mut self.volume {
+                    volume.level = level;
+                }
+            }
+            (Command::ToggleMute, None) => {
+                if let Some(volume) = &mut self.volume {
+                    volume.muted = !volume.muted;
+                }
+            }
+            (_, None) => {}
         }
     }
 }

@@ -17,6 +17,11 @@ language = "auto"
 #   "keep"  - leave it and ignore it (the two may overlap)
 native_osd = "avoid"
 
+# Also show the flyout when the player starts or pauses, from the player's
+# own window or from the buttons of Bluetooth headphones (a new track, a
+# volume change and the media keys always show it).
+show_on_play_pause = true
+
 [display]
 # Monitor to show the flyout on: "primary", "cursor" (the one the mouse
 # pointer is on) or a number from 1. A missing number means the primary one.

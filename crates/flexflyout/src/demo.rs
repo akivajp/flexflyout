@@ -5,7 +5,7 @@
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use flexflyout_core::{Cover, NowPlaying, PlaybackStatus, Volume};
+use flexflyout_core::{Cover, NowPlaying, PlaybackStatus, RepeatMode, Timeline, Volume};
 
 use crate::app::{Message, Trigger};
 
@@ -15,7 +15,8 @@ const INTERVAL: Duration = Duration::from_secs(6);
 
 /// Sample tracks: a Japanese title (fonts) with square cover art, a long
 /// one (truncation) with wide art (cropping), and a video without an artist
-/// or art (the placeholder).
+/// or art (the placeholder). The first two have a position and
+/// shuffle and repeat; the video has none of them (a live stream).
 const TRACKS: [SampleTrack; 3] = [
     (
         "サンプルの曲（Sample Track）",
@@ -58,6 +59,19 @@ pub fn spawn(cycles: u32, send: impl Fn(Message) + Send + 'static) {
                         PlaybackStatus::Paused
                     },
                     cover: covers[n].clone(),
+                    // 1:05 into a 3:30 track, then 2:10 into the long one.
+                    timeline: (n < 2).then(|| Timeline {
+                        position: Duration::from_secs(65 * (n as u64 + 1)),
+                        updated: Instant::now(),
+                        length: Duration::from_secs(210 + 200 * n as u64),
+                        seekable: true,
+                    }),
+                    repeat: (n < 2).then_some(if n == 0 {
+                        RepeatMode::List
+                    } else {
+                        RepeatMode::Track
+                    }),
+                    shuffle: (n < 2).then_some(n == 0),
                 })));
                 // 20%, 40%, … with every fourth one muted.
                 send(Message::Volume(Volume {

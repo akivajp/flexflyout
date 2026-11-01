@@ -46,6 +46,9 @@ pub struct General {
     pub language: String,
     /// What to do with the operating system's own volume indicator.
     pub native_osd: NativeOsd,
+    /// Whether the flyout also shows when the player starts or pauses
+    /// (besides a new track, a volume change and the keys).
+    pub show_on_play_pause: bool,
 }
 
 impl Default for General {
@@ -53,6 +56,7 @@ impl Default for General {
         Self {
             language: "auto".to_owned(),
             native_osd: NativeOsd::default(),
+            show_on_play_pause: true,
         }
     }
 }

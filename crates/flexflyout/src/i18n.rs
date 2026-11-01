@@ -71,6 +71,12 @@ pub fn labels(loader: &FluentLanguageLoader) -> Labels {
         previous: fl!(loader, "previous"),
         play_pause: fl!(loader, "play-pause"),
         next: fl!(loader, "next"),
+        position: fl!(loader, "position"),
+        shuffle: fl!(loader, "shuffle"),
+        repeat: fl!(loader, "repeat"),
+        volume: fl!(loader, "volume"),
+        mute: fl!(loader, "mute"),
+        pin: fl!(loader, "pin"),
     }
 }
 
