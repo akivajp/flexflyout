@@ -46,6 +46,11 @@ scale = 1.0
 # and the buttons stay opaque.
 opacity = 0.92
 
+# A pinned flyout can be dragged anywhere. With false it comes back to the
+# place above the next time it shows; with true the place it was dragged to
+# is written above (monitor, anchor and offsets) and used from then on.
+remember_drag = false
+
 [timing]
 # In milliseconds. The flyout fades in, stays for `hold_ms` after the last
 # volume change or track change, then fades out. 0 fades at once.

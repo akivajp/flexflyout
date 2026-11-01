@@ -8,22 +8,25 @@
 //! as usual.
 
 use std::ffi::c_void;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use anyhow::Context as _;
 use flexflyout_core::layout::PixelRect;
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
-use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, RECT, WPARAM};
+use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
 use windows::Win32::Graphics::Dwm::{DWMWA_BORDER_COLOR, DWMWA_COLOR_NONE, DwmSetWindowAttribute};
-use windows::Win32::Graphics::Gdi::{BLACK_BRUSH, GetStockObject};
+use windows::Win32::Graphics::Gdi::{BLACK_BRUSH, GetStockObject, ScreenToClient};
+use windows::Win32::UI::Input::KeyboardAndMouse::ReleaseCapture;
 use windows::Win32::UI::Shell::{DefSubclassProc, SetWindowSubclass};
 use windows::Win32::UI::WindowsAndMessaging::{
-    EnumWindows, GCLP_HBRBACKGROUND, GWL_EXSTYLE, GetForegroundWindow, GetWindowLongPtrW,
-    GetWindowRect, GetWindowTextW, GetWindowThreadProcessId, HWND_TOPMOST, IsIconic,
-    IsWindowVisible, MA_NOACTIVATE, SET_WINDOW_POS_FLAGS, STYLESTRUCT, SW_HIDE, SW_RESTORE,
-    SWP_ASYNCWINDOWPOS, SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER,
-    SWP_SHOWWINDOW, SetClassLongPtrW, SetForegroundWindow, SetWindowLongPtrW, SetWindowPos,
-    ShowWindow, WINDOW_EX_STYLE, WM_MOUSEACTIVATE, WM_MOUSEMOVE, WM_STYLECHANGING, WS_EX_APPWINDOW,
-    WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
+    EnumWindows, GCLP_HBRBACKGROUND, GWL_EXSTYLE, GetCursorPos, GetForegroundWindow,
+    GetWindowLongPtrW, GetWindowRect, GetWindowTextW, GetWindowThreadProcessId, HTCAPTION,
+    HWND_TOPMOST, IsIconic, IsWindowVisible, MA_NOACTIVATE, PostMessageW, SET_WINDOW_POS_FLAGS,
+    STYLESTRUCT, SW_HIDE, SW_RESTORE, SWP_ASYNCWINDOWPOS, SWP_FRAMECHANGED, SWP_NOACTIVATE,
+    SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SWP_SHOWWINDOW, SetClassLongPtrW, SetForegroundWindow,
+    SetWindowLongPtrW, SetWindowPos, ShowWindow, WINDOW_EX_STYLE, WM_ENTERSIZEMOVE,
+    WM_EXITSIZEMOVE, WM_LBUTTONUP, WM_MOUSEACTIVATE, WM_MOUSEMOVE, WM_NCLBUTTONDOWN,
+    WM_STYLECHANGING, WS_EX_APPWINDOW, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
 };
 
 /// Sent when the pointer leaves a window that asked for it (the windows
@@ -125,12 +128,49 @@ impl FlyoutWindow {
         unsafe { IsWindowVisible(self.0).as_bool() }
     }
 
+    /// Lets the user move the window with the mouse button that is down:
+    /// Windows' own move loop, as when dragging a title bar. egui's
+    /// `StartDrag` does the same through winit, but only for a window that
+    /// has the focus, which the flyout never takes.
+    pub fn start_move(&self) {
+        let mut point = POINT::default();
+        // SAFETY: plain calls on our own window, from its thread. The posted
+        // message starts the move loop once this frame is done.
+        unsafe {
+            let _ = GetCursorPos(&mut point);
+            let _ = ReleaseCapture();
+            let position = (point.x as i16 as u16 as u32) | ((point.y as i16 as u16 as u32) << 16);
+            let _ = PostMessageW(
+                Some(self.0),
+                WM_NCLBUTTONDOWN,
+                WPARAM(HTCAPTION as usize),
+                LPARAM(position as isize),
+            );
+        }
+    }
+
     /// Hides the window.
     pub fn hide(&self) {
         // SAFETY: a plain call on our own window. The return value is the
         // previous visibility, not an error.
         let _ = unsafe { ShowWindow(self.0, SW_HIDE) };
     }
+}
+
+/// Whether the user is moving the window with the mouse (Windows' move
+/// loop runs), and whether a move ended since [`take_move_ended`] was
+/// last called.
+static MOVING: AtomicBool = AtomicBool::new(false);
+static MOVE_ENDED: AtomicBool = AtomicBool::new(false);
+
+/// Whether the user is moving the window with the mouse right now.
+pub fn is_moving() -> bool {
+    MOVING.load(Ordering::Acquire)
+}
+
+/// Whether the user finished moving the window since the last call.
+pub fn take_move_ended() -> bool {
+    MOVE_ENDED.swap(false, Ordering::AcqRel)
 }
 
 /// Subclass procedure of the flyout window, in front of winit's.
@@ -158,6 +198,27 @@ unsafe extern "system" fn keep_flyout_styles(
             let outside = (i16::MIN as u16 as u32) | ((i16::MIN as u16 as u32) << 16);
             // SAFETY: a mouse move with no buttons down, to winit's procedure.
             unsafe { DefSubclassProc(hwnd, WM_MOUSEMOVE, WPARAM(0), LPARAM(outside as isize)) };
+        }
+        WM_ENTERSIZEMOVE => MOVING.store(true, Ordering::Release),
+        WM_EXITSIZEMOVE => {
+            MOVING.store(false, Ordering::Release);
+            MOVE_ENDED.store(true, Ordering::Release);
+            // SAFETY: passes the message on first, as usual.
+            let result = unsafe { DefSubclassProc(hwnd, message, wparam, lparam) };
+            // Windows' move loop swallows the button's release, so egui
+            // would still think it held: tell winit about it. It also
+            // wakes egui up to notice that the move ended.
+            let mut point = POINT::default();
+            // SAFETY: plain queries into a local POINT, then a button
+            // release (no buttons down) to winit's procedure.
+            unsafe {
+                let _ = GetCursorPos(&mut point);
+                let _ = ScreenToClient(hwnd, &mut point);
+                let position =
+                    (point.x as i16 as u16 as u32) | ((point.y as i16 as u16 as u32) << 16);
+                DefSubclassProc(hwnd, WM_LBUTTONUP, WPARAM(0), LPARAM(position as isize));
+            }
+            return result;
         }
         WM_STYLECHANGING if wparam.0 as i32 == GWL_EXSTYLE.0 => {
             // SAFETY: for WM_STYLECHANGING, lparam points to the new styles,

@@ -48,6 +48,8 @@ pub struct Labels {
     pub mute: String,
     /// The pin button (keeps the flyout shown).
     pub pin: String,
+    /// The close button (hides the flyout now).
+    pub close: String,
 }
 
 /// Everything the panel shows in one frame.
@@ -118,6 +120,17 @@ pub fn draw(ui: &mut Ui, view: &FlyoutView<'_>) -> Option<Command> {
         Color32::from_rgba_unmultiplied(BACKGROUND.r(), BACKGROUND.g(), BACKGROUND.b(), alpha);
     painter.rect_filled(rect, CornerRadius::same(14), background);
 
+    // A pinned flyout can be dragged by its background. The controls are
+    // added later, on top, so they keep their clicks and drags.
+    // It senses clicks too, so that a drag starts only once the pointer
+    // moved a little: a press on a control must stay a click.
+    let grab = view
+        .pinned
+        .then(|| ui.interact(rect, ui.scope_id().with("move"), Sense::click_and_drag()));
+    // Whether the pointer is on a control (where the "move" cursor would
+    // be wrong, although a drag there moves the flyout too).
+    let mut on_control = false;
+
     // Square cover art on the left, as tall as the content area, or a
     // placeholder when the player gives none.
     let side = rect.height() - 2.0 * MARGIN;
@@ -131,15 +144,32 @@ pub fn draw(ui: &mut Ui, view: &FlyoutView<'_>) -> Option<Command> {
     // Text and controls to the right of the cover art.
     let left = cover.right() + GAP;
     let right = rect.right() - MARGIN;
-    let width = right - left;
 
-    // The pin button in the top-right corner.
-    let pin = Rect::from_min_size(
+    // The close and pin buttons in the top-right corner.
+    let close = Rect::from_min_size(
         pos2(right - SMALL_BUTTON_SIZE.x, rect.top() + MARGIN - 4.0),
         SMALL_BUTTON_SIZE,
     );
+    if button(
+        ui,
+        close,
+        Icon::Close,
+        &labels.close,
+        Some(SECONDARY_TEXT),
+        &mut on_control,
+    ) {
+        command = Some(Command::Close);
+    }
+    let pin = close.translate(vec2(-(SMALL_BUTTON_SIZE.x + 4.0), 0.0));
     let pin_color = if view.pinned { ACCENT } else { SECONDARY_TEXT };
-    if button(ui, pin, Icon::Pin, &labels.pin, Some(pin_color)) {
+    if button(
+        ui,
+        pin,
+        Icon::Pin,
+        &labels.pin,
+        Some(pin_color),
+        &mut on_control,
+    ) {
         command = Some(Command::Pin(!view.pinned));
     }
 
@@ -148,7 +178,7 @@ pub fn draw(ui: &mut Ui, view: &FlyoutView<'_>) -> Option<Command> {
         None => (labels.nothing_playing.as_str(), ""),
     };
     // Long titles are cut with "…" instead of wrapping out of the panel.
-    let text_width = width - SMALL_BUTTON_SIZE.x - 4.0;
+    let text_width = pin.left() - 4.0 - left;
     let title_rect = Rect::from_min_size(
         pos2(left, rect.top() + MARGIN - 2.0),
         vec2(text_width, 24.0),
@@ -156,7 +186,11 @@ pub fn draw(ui: &mut Ui, view: &FlyoutView<'_>) -> Option<Command> {
     put_left(
         ui,
         title_rect,
-        egui::Label::new(RichText::new(title).size(18.0).color(Color32::WHITE)).truncate(),
+        // Not selectable: a selectable label takes the drags meant for
+        // moving the pinned flyout.
+        egui::Label::new(RichText::new(title).size(18.0).color(Color32::WHITE))
+            .truncate()
+            .selectable(false),
     );
     if !artist.is_empty() {
         let artist_rect =
@@ -164,7 +198,9 @@ pub fn draw(ui: &mut Ui, view: &FlyoutView<'_>) -> Option<Command> {
         put_left(
             ui,
             artist_rect,
-            egui::Label::new(RichText::new(artist).size(14.0).color(SECONDARY_TEXT)).truncate(),
+            egui::Label::new(RichText::new(artist).size(14.0).color(SECONDARY_TEXT))
+                .truncate()
+                .selectable(false),
         );
     }
 
@@ -182,6 +218,7 @@ pub fn draw(ui: &mut Ui, view: &FlyoutView<'_>) -> Option<Command> {
         let length = timeline.length.as_secs_f32();
         let value = position.as_secs_f32() / length;
         let (response, shown) = slider(ui, bar, value, &labels.position, timeline.seekable);
+        on_control |= response.hovered();
         paint_bar(&painter, bar, shown, ACCENT, &response);
         // Seek once the button is released: players stutter when asked to
         // seek on every frame of a drag.
@@ -260,7 +297,7 @@ pub fn draw(ui: &mut Ui, view: &FlyoutView<'_>) -> Option<Command> {
             pos2(left + i as f32 * (BUTTON_SIZE.x + BUTTON_GAP), buttons_top),
             BUTTON_SIZE,
         );
-        if button(ui, r, icon, name, color) {
+        if button(ui, r, icon, name, color, &mut on_control) {
             command = cmd;
         }
     }
@@ -278,7 +315,14 @@ pub fn draw(ui: &mut Ui, view: &FlyoutView<'_>) -> Option<Command> {
         } else {
             Icon::Speaker
         };
-        if button(ui, mute, icon, &labels.mute, Some(SECONDARY_TEXT)) {
+        if button(
+            ui,
+            mute,
+            icon,
+            &labels.mute,
+            Some(SECONDARY_TEXT),
+            &mut on_control,
+        ) {
             command = Some(Command::ToggleMute);
         }
         // Room for the wider of "100%" and the "muted" text (long in some
@@ -299,6 +343,7 @@ pub fn draw(ui: &mut Ui, view: &FlyoutView<'_>) -> Option<Command> {
         );
         let level = volume.level.clamp(0.0, 1.0);
         let (response, shown) = slider(ui, bar, level, &labels.volume, true);
+        on_control |= response.hovered();
         let fill = if volume.muted { VOLUME_MUTED } else { ACCENT };
         paint_bar(&painter, bar, shown, fill, &response);
         let shown_volume = Volume {
@@ -324,20 +369,40 @@ pub fn draw(ui: &mut Ui, view: &FlyoutView<'_>) -> Option<Command> {
         );
     }
 
+    if let Some(grab) = grab {
+        // A drag that starts on a control (off by a few pixels from a
+        // click) does not move the flyout.
+        if grab.drag_started() && !on_control {
+            command = Some(Command::StartMove);
+        }
+        // The "move" cursor on the background, and while dragging.
+        if (grab.hovered() && !on_control) || grab.dragged() {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::Move);
+        }
+    }
+
     command
 }
 
 /// A button with an icon on a faint rounded background, brighter on hover
 /// and while pressed. `color` is the icon's color, or `None` for a button
 /// that cannot be used now (drawn grayed out). Returns whether it was
-/// clicked.
-fn button(ui: &mut Ui, rect: Rect, icon: Icon, name: &str, color: Option<Color32>) -> bool {
+/// clicked, and sets `hovered` when the pointer is on it.
+fn button(
+    ui: &mut Ui,
+    rect: Rect,
+    icon: Icon,
+    name: &str,
+    color: Option<Color32>,
+    hovered: &mut bool,
+) -> bool {
     let sense = if color.is_some() {
         Sense::click()
     } else {
         Sense::hover()
     };
     let response = ui.allocate_rect(rect, sense);
+    *hovered |= response.hovered();
     // Screen readers (and tests) see the translated name.
     response.widget_info(|| WidgetInfo::labeled(Role::Button, color.is_some(), name));
     // Own colors rather than egui's theme, which follows the OS (light or
@@ -470,6 +535,7 @@ enum Icon {
     Speaker,
     SpeakerMuted,
     Pin,
+    Close,
 }
 
 /// Draws `icon` centered on `center`, `r` points from the center to the edge.
@@ -583,6 +649,11 @@ fn paint_icon(painter: &egui::Painter, icon: Icon, center: Pos2, r: f32, color: 
                 }
             }
         }
+        Icon::Close => {
+            let d = r * 0.75;
+            painter.line_segment([pos2(x - d, y - d), pos2(x + d, y + d)], line);
+            painter.line_segment([pos2(x - d, y + d), pos2(x + d, y - d)], line);
+        }
         Icon::Pin => {
             // An upright push pin: the cap, the body, the collar and the
             // needle.
@@ -659,6 +730,7 @@ mod tests {
             volume: "Volume".into(),
             mute: "Mute".into(),
             pin: "Pin".into(),
+            close: "Close".into(),
         }
     }
 
@@ -687,6 +759,16 @@ mod tests {
         labels: &'a Labels,
         now: Instant,
     ) -> Harness<'a, Vec<Command>> {
+        harness_pinned(track, labels, now, false)
+    }
+
+    /// [`harness`], pinned or not.
+    fn harness_pinned<'a>(
+        track: &'a NowPlaying,
+        labels: &'a Labels,
+        now: Instant,
+        pinned: bool,
+    ) -> Harness<'a, Vec<Command>> {
         Harness::builder().with_size(BASE_SIZE).build_ui_state(
             move |ui, commands: &mut Vec<Command>| {
                 let view = FlyoutView {
@@ -695,7 +777,7 @@ mod tests {
                         level: 0.42,
                         muted: false,
                     }),
-                    pinned: false,
+                    pinned,
                     now,
                     background_opacity: 0.9,
                     labels,
@@ -713,6 +795,7 @@ mod tests {
         let labels = labels();
         let mut harness = harness(&track, &labels, now);
         for (name, expected) in [
+            ("Close", Command::Close),
             ("Previous", Command::Previous),
             ("Play / pause", Command::TogglePlayPause),
             ("Next", Command::Next),
@@ -725,7 +808,28 @@ mod tests {
             harness.run();
             assert_eq!(harness.state().last(), Some(&expected), "button {name}");
         }
-        assert_eq!(harness.state().len(), 7);
+        assert_eq!(harness.state().len(), 8);
+    }
+
+    #[test]
+    fn only_a_pinned_flyout_can_be_dragged_by_its_background() {
+        let now = Instant::now();
+        let track = track(now);
+        let labels = labels();
+        for pinned in [false, true] {
+            let mut harness = harness_pinned(&track, &labels, now, pinned);
+            // Right of the playback buttons: nothing but the background.
+            let (from, to) = (pos2(370.0, 96.0), pos2(300.0, 130.0));
+            harness.hover_at(from);
+            harness.drag_at(from);
+            harness.run();
+            harness.hover_at(to);
+            harness.run();
+            harness.drop_at(to);
+            harness.run();
+            let moved = harness.state().contains(&Command::StartMove);
+            assert_eq!(moved, pinned, "pinned: {pinned}");
+        }
     }
 
     #[test]

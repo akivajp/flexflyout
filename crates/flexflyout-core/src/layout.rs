@@ -203,6 +203,82 @@ pub fn place(display: &Display, monitor: &MonitorArea, base_size: (f32, f32)) ->
     PixelRect::from_origin_size(x, y, width, height)
 }
 
+/// The placement settings that put a flyout of `rect` where it is now: the
+/// rest of `display` with the monitor, anchor and offsets changed (for a
+/// flyout the user dragged there).
+///
+/// The monitor is the one under the middle of `rect` (or the nearest one);
+/// the monitor setting stays if it already leads there (with the pointer
+/// at `cursor`). The anchor is the one of the nine regions of the work
+/// area the middle lies in, so that the flyout keeps its place relative to
+/// the nearest edges. A rectangle partly outside the work area is taken
+/// as moved back inside, as [`place`] would put it.
+pub fn display_for(
+    rect: PixelRect,
+    display: &Display,
+    monitors: &[MonitorArea],
+    cursor: Option<(i32, i32)>,
+) -> Display {
+    let mut result = display.clone();
+    let middle = (rect.left + rect.width() / 2, rect.top + rect.height() / 2);
+    // Squared distance from the middle to a monitor (0 inside it).
+    let distance = |monitor: &MonitorArea| {
+        let b = monitor.bounds;
+        let dx = (b.left - middle.0).max(middle.0 - (b.right - 1)).max(0) as i64;
+        let dy = (b.top - middle.1).max(middle.1 - (b.bottom - 1)).max(0) as i64;
+        dx * dx + dy * dy
+    };
+    let Some(index) = (0..monitors.len()).min_by_key(|&i| distance(&monitors[i])) else {
+        return result;
+    };
+    let monitor = &monitors[index];
+    if choose_monitor(monitors, display.monitor, cursor) != Some(index) {
+        result.monitor = Monitor::Number(index as u32 + 1);
+    }
+
+    let work = monitor.work;
+    let (width, height) = (rect.width(), rect.height());
+    let left = rect.left.min(work.right - width).max(work.left);
+    let top = rect.top.min(work.bottom - height).max(work.top);
+    // Which third of the work area the middle is in, along each axis.
+    let third = |position: i32, start: i32, length: i32| {
+        let offset = (position - start) * 3;
+        if offset < length {
+            Edge::Start
+        } else if offset < 2 * length {
+            Edge::Center
+        } else {
+            Edge::End
+        }
+    };
+    let column = third(left + width / 2, work.left, work.width());
+    let row = third(top + height / 2, work.top, work.height());
+    result.anchor = match (column, row) {
+        (Edge::Start, Edge::Start) => Anchor::TopLeft,
+        (Edge::Center, Edge::Start) => Anchor::Top,
+        (Edge::End, Edge::Start) => Anchor::TopRight,
+        (Edge::Start, Edge::Center) => Anchor::Left,
+        (Edge::Center, Edge::Center) => Anchor::Center,
+        (Edge::End, Edge::Center) => Anchor::Right,
+        (Edge::Start, Edge::End) => Anchor::BottomLeft,
+        (Edge::Center, Edge::End) => Anchor::Bottom,
+        (Edge::End, Edge::End) => Anchor::BottomRight,
+    };
+    // The offsets as `place` measures them, in pixels at 100% scaling.
+    let to_points = |pixels: i32| (pixels as f32 / monitor.scale).round() as i32;
+    result.offset_x = to_points(match column {
+        Edge::Start => left - work.left,
+        Edge::Center => left - (work.left + (work.width() - width) / 2),
+        Edge::End => work.right - width - left,
+    });
+    result.offset_y = to_points(match row {
+        Edge::Start => top - work.top,
+        Edge::Center => top - (work.top + (work.height() - height) / 2),
+        Edge::End => work.bottom - height - top,
+    });
+    result
+}
+
 /// Where along one axis an anchor lies.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Edge {
@@ -398,5 +474,74 @@ mod tests {
         let r = place(&huge, &small, BASE);
         assert_eq!((r.left, r.top), (0, 0));
         assert_eq!((r.width(), r.height()), (1520, 512));
+    }
+
+    #[test]
+    fn a_dragged_flyout_is_placed_there_again() {
+        let monitors = monitors();
+        let base = (400.0, 164.0);
+        // Spots on both monitors, near every kind of anchor, and one
+        // partly off the screen.
+        let spots = [
+            (30, 40),
+            (760, 20),
+            (1500, 860),
+            (1700, 400),
+            (900, 500),
+            (1850, 1000),
+            (-2400, -100),
+            (-1300, 500),
+            (-700, 1000),
+        ];
+        for (x, y) in spots {
+            let start = Display::default();
+            let monitor =
+                choose_monitor(&monitors, Monitor::Number(if x < 0 { 2 } else { 1 }), None)
+                    .unwrap();
+            let size = place(&start, &monitors[monitor], base);
+            let rect = PixelRect::from_origin_size(x, y, size.width(), size.height());
+            let display = display_for(rect, &start, &monitors, Some((x + 10, y + 10)));
+            let chosen =
+                choose_monitor(&monitors, display.monitor, Some((x + 10, y + 10))).unwrap();
+            assert_eq!(chosen, monitor, "monitor for {rect:?}");
+            let again = place(&display, &monitors[chosen], base);
+            // Inside the work area, within a pixel of rounding.
+            let work = monitors[chosen].work;
+            let expected_left = x.min(work.right - rect.width()).max(work.left);
+            let expected_top = y.min(work.bottom - rect.height()).max(work.top);
+            assert!(
+                (again.left - expected_left).abs() <= 1 && (again.top - expected_top).abs() <= 1,
+                "{rect:?} came back as {again:?} with {display:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn dragging_keeps_a_monitor_setting_that_still_fits() {
+        let monitors = monitors();
+        let rect = PixelRect::from_origin_size(100, 100, 400, 164);
+        let primary = Display::default();
+        assert_eq!(
+            display_for(rect, &primary, &monitors, None).monitor,
+            Monitor::Primary
+        );
+        let cursor = Display {
+            monitor: Monitor::Cursor,
+            ..Display::default()
+        };
+        assert_eq!(
+            display_for(rect, &cursor, &monitors, Some((150, 150))).monitor,
+            Monitor::Cursor
+        );
+        // Onto the other monitor: by number.
+        let other = PixelRect::from_origin_size(-1000, 100, 600, 246);
+        assert_eq!(
+            display_for(other, &primary, &monitors, None).monitor,
+            Monitor::Number(2)
+        );
+        assert_eq!(
+            display_for(rect, &primary, &monitors, None).anchor,
+            Anchor::TopLeft
+        );
     }
 }

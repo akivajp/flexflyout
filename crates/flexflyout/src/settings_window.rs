@@ -433,6 +433,10 @@ impl SettingsWindow {
                 );
                 ui.end_row();
             });
+        ui.checkbox(
+            &mut display.remember_drag,
+            fl!(loader, "settings-remember-drag"),
+        );
     }
 
     /// Fade in, display time, fade out.

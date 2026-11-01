@@ -165,6 +165,11 @@ pub enum Command {
     /// Keep the flyout shown until it is unpinned (`true`), or let it fade
     /// out again (`false`).
     Pin(bool),
+    /// Hide the flyout now (and unpin it).
+    Close,
+    /// Start moving the (pinned) flyout with the mouse: the pointer was
+    /// pressed on its background and is being dragged.
+    StartMove,
 }
 
 #[cfg(test)]

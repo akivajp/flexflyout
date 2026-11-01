@@ -157,6 +157,9 @@ struct Placement {
     native_osd: NativeOsd,
     /// Where the window was placed last.
     rect: Option<PixelRect>,
+    /// Where the user moved the shown window to: it stays there until it
+    /// hides or the settings change.
+    moved_to: Option<PixelRect>,
 }
 
 /// [`Placement`] behind a lock.
@@ -169,6 +172,7 @@ impl SharedPlacement {
             display,
             native_osd,
             rect: None,
+            moved_to: None,
         })))
     }
 
@@ -181,6 +185,10 @@ impl SharedPlacement {
     /// monitor under the pointer can change every time), and remembers it.
     fn next_rect(&self) -> Option<PixelRect> {
         let mut placement = self.lock();
+        if let Some(rect) = placement.moved_to {
+            placement.rect = Some(rect);
+            return Some(rect);
+        }
         let monitors = monitor::list();
         let rect = layout::choose_monitor(&monitors, placement.display.monitor, monitor::cursor())
             .map(|i| {
@@ -239,6 +247,8 @@ struct FlyoutApp {
     controls: Option<Controls>,
     window: FlyoutWindow,
     placement: SharedPlacement,
+    /// The settings file, where a dragged place is remembered.
+    config_file: PathBuf,
     show_via_egui: bool,
     /// Why and when the flyout was last asked to show, until the first
     /// frame after that has been drawn (then the delay is logged).
@@ -329,6 +339,7 @@ impl FlyoutApp {
             controls,
             window,
             placement,
+            config_file: options.config_file.clone(),
             show_via_egui: options.show_via_egui,
             pending: None,
             cleared: false,
@@ -352,7 +363,8 @@ impl FlyoutApp {
     /// it for the new scaling, and they may move it as well; the rectangle
     /// was already computed for that monitor, so placing it again settles.
     fn keep_in_place(&self) {
-        if !self.window.is_visible() {
+        // Not while the user moves it, of course.
+        if !self.window.is_visible() || window::is_moving() {
             return;
         }
         let Some(wanted) = self.placement.lock().rect else {
@@ -464,6 +476,9 @@ fn send(
             let mut placement = placement.lock();
             placement.display = config.display.clone();
             placement.native_osd = config.general.native_osd;
+            // New settings place the flyout anew (a remembered drag comes
+            // back here as new settings too).
+            placement.moved_to = None;
             true
         }
         Message::NowPlaying(_) | Message::Volume(_) | Message::Quit => false,
@@ -523,6 +538,9 @@ impl eframe::App for FlyoutApp {
             }
         }
 
+        if window::take_move_ended() {
+            self.finish_move();
+        }
         self.keep_in_place();
         // A pinned flyout stays, and so does one under the mouse pointer
         // (to reach its buttons).
@@ -546,6 +564,8 @@ impl eframe::App for FlyoutApp {
             // Finished: hide once a blank frame is on the screen.
             None if self.window.is_visible() => {
                 if self.cleared {
+                    // A place the user dragged it to lasts one appearance.
+                    self.placement.lock().moved_to = None;
                     if self.show_via_egui {
                         ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
                     } else {
@@ -590,7 +610,7 @@ impl eframe::App for FlyoutApp {
             labels: &self.labels,
         };
         if let Some(command) = flexflyout_ui::draw(ui, &view) {
-            self.carry_out(command, now);
+            self.carry_out(command, now, ui.ctx());
         }
     }
 }
@@ -612,8 +632,44 @@ impl FlyoutApp {
         self.now_playing = new;
     }
 
+    /// The user dropped the window somewhere else: it stays there for this
+    /// appearance, and from then on if the settings say so.
+    fn finish_move(&mut self) {
+        let Some(rect) = self.window.rect() else {
+            return;
+        };
+        {
+            let mut placement = self.placement.lock();
+            placement.rect = Some(rect);
+            placement.moved_to = Some(rect);
+        }
+        log::info!(
+            "moved to {rect:?}; focus: \"{}\"",
+            window::foreground_window_title()
+        );
+        if !self.config.display.remember_drag {
+            return;
+        }
+        let display = layout::display_for(
+            rect,
+            &self.config.display,
+            &monitor::list(),
+            monitor::cursor(),
+        );
+        let config = Config {
+            display,
+            ..self.config.clone()
+        };
+        // The settings file is watched: the new place comes back as new
+        // settings, like a change made in the settings window.
+        match config.save(&self.config_file, &self.config) {
+            Ok(()) => log::info!("remembered the place: {:?}", config.display),
+            Err(err) => log::error!("cannot remember the place: {err}"),
+        }
+    }
+
     /// Carries out what the user did with the flyout's controls.
-    fn carry_out(&mut self, command: Command, now: Instant) {
+    fn carry_out(&mut self, command: Command, now: Instant, ctx: &egui::Context) {
         log::info!("control: {command:?}");
         if let Command::Seek(position) = command
             && let Some(timeline) = self.now_playing.as_mut().and_then(|t| t.timeline.as_mut())
@@ -625,6 +681,14 @@ impl FlyoutApp {
             self.seeked = Some(now);
         }
         match (command, &self.controls) {
+            (Command::Close, _) => {
+                self.pinned = false;
+                self.timer.cancel();
+                ctx.request_repaint();
+            }
+            // Windows moves the window from here, until the button is
+            // released (see `finish_move`).
+            (Command::StartMove, _) => self.window.start_move(),
             (Command::Pin(pinned), _) => {
                 self.pinned = pinned;
                 // Unpinned: the usual display time from now on.

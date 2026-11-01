@@ -9,7 +9,8 @@ shuffle = シャッフル
 repeat = リピート
 volume = 音量
 mute = ミュート
-pin = 表示したままにする
+pin = 表示したままにする（ドラッグで移動）
+close = 閉じる
 
 # 通知領域のアイコンのメニュー。
 tray-show = Flyout を表示
@@ -44,6 +45,7 @@ settings-offset-x = 横の距離
 settings-offset-y = 縦の距離
 settings-scale = 大きさ
 settings-opacity = 背景の不透明度
+settings-remember-drag = ピン留めしてドラッグした位置を、次からの表示位置にする
 settings-timing = 表示時間
 settings-fade-in = フェードイン
 settings-hold = 表示する時間

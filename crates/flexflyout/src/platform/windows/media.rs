@@ -464,7 +464,11 @@ fn send_command(current: Option<&Current>, command: Command) {
             RepeatMode::List => SmtcRepeat::List,
         }),
         Command::SetShuffle(on) => session.TryChangeShuffleActiveAsync(on),
-        Command::SetVolume(_) | Command::ToggleMute | Command::Pin(_) => {
+        Command::SetVolume(_)
+        | Command::ToggleMute
+        | Command::Pin(_)
+        | Command::Close
+        | Command::StartMove => {
             log::warn!("{command:?} is not for the player");
             return;
         }

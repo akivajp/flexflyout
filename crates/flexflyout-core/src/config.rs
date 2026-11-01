@@ -107,6 +107,10 @@ pub struct Display {
     /// Opacity of the panel's background, from 0.0 (invisible) to 1.0.
     /// The text and the buttons stay opaque.
     pub opacity: f32,
+    /// Whether dragging a pinned flyout sets where it appears from then on
+    /// (the monitor, anchor and offsets above are rewritten), rather than
+    /// moving it until it hides.
+    pub remember_drag: bool,
 }
 
 impl Default for Display {
@@ -118,6 +122,7 @@ impl Default for Display {
             offset_y: 24,
             scale: 1.0,
             opacity: 0.92,
+            remember_drag: false,
         }
     }
 }

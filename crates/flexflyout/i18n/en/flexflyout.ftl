@@ -9,7 +9,8 @@ shuffle = Shuffle
 repeat = Repeat
 volume = Volume
 mute = Mute
-pin = Keep shown
+pin = Keep shown (drag to move)
+close = Close
 
 # The menu of the notification area icon.
 tray-show = Show the flyout
@@ -44,6 +45,7 @@ settings-offset-x = Horizontal distance
 settings-offset-y = Vertical distance
 settings-scale = Size
 settings-opacity = Background opacity
+settings-remember-drag = Keep the place a pinned flyout is dragged to
 settings-timing = Timing
 settings-fade-in = Fade in
 settings-hold = Display time
