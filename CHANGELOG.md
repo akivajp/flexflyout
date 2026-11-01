@@ -7,6 +7,11 @@ include breaking changes).
 
 ## [Unreleased]
 
+### Added
+- The flyout slides in from the nearest edge of the screen while it fades
+  in, and back out while it fades out. `timing.animation = "fade"` (or
+  "Fade only" in the settings window) keeps it in place.
+
 ## [0.1.0] - 2026-11-02
 
 The first release, for Windows 11.

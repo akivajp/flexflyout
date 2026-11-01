@@ -233,6 +233,12 @@ unsafe extern "system" fn keep_flyout_styles(
     unsafe { DefSubclassProc(hwnd, message, wparam, lparam) }
 }
 
+/// Whether the window (a raw handle, usable from any thread) is shown.
+pub fn is_visible(raw: isize) -> bool {
+    // SAFETY: a plain query; a stale handle only answers false.
+    raw != 0 && unsafe { IsWindowVisible(HWND(raw as *mut c_void)) }.as_bool()
+}
+
 /// Moves and resizes the window, puts it above the other always-on-top
 /// windows and, if `show`, shows it, all without activating it. Safe to call
 /// from any thread: the request is posted to the window's thread instead of

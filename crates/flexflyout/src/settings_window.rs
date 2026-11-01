@@ -16,7 +16,7 @@ use std::time::{Duration, Instant, SystemTime};
 
 use eframe::egui;
 use flexflyout_core::Config;
-use flexflyout_core::config::{Anchor, Monitor, NativeOsd, SCALE_RANGE};
+use flexflyout_core::config::{Anchor, Animation, Monitor, NativeOsd, SCALE_RANGE};
 use i18n_embed::fluent::FluentLanguageLoader;
 use i18n_embed_fl::fl;
 
@@ -471,6 +471,20 @@ impl SettingsWindow {
                     );
                     ui.end_row();
                 }
+                ui.label(loader.get("settings-animation"));
+                ui.horizontal(|ui| {
+                    ui.radio_value(
+                        &mut timing.animation,
+                        Animation::Slide,
+                        loader.get("settings-animation-slide"),
+                    );
+                    ui.radio_value(
+                        &mut timing.animation,
+                        Animation::Fade,
+                        loader.get("settings-animation-fade"),
+                    );
+                });
+                ui.end_row();
             });
     }
 

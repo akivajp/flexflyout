@@ -14,7 +14,7 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant};
 
 use eframe::egui;
-use flexflyout_core::config::{Display, Monitor, NativeOsd};
+use flexflyout_core::config::{Animation, Display, Monitor, NativeOsd};
 use flexflyout_core::layout::{self, MonitorArea, PixelRect};
 use flexflyout_core::{Command, Config, FlyoutTimer, NowPlaying, PlaybackStatus, Volume};
 use flexflyout_ui::{BASE_SIZE, FlyoutView, Labels};
@@ -155,7 +155,9 @@ struct Placement {
     display: Display,
     /// What to do with the Windows volume indicator.
     native_osd: NativeOsd,
-    /// Where the window was placed last.
+    /// How the flyout comes and goes.
+    animation: Animation,
+    /// Where the window was placed last (where it rests, when sliding).
     rect: Option<PixelRect>,
     /// Where the user moved the shown window to: it stays there until it
     /// hides or the settings change.
@@ -167,10 +169,11 @@ struct Placement {
 struct SharedPlacement(Arc<Mutex<Placement>>);
 
 impl SharedPlacement {
-    fn new(display: Display, native_osd: NativeOsd) -> Self {
+    fn new(display: Display, native_osd: NativeOsd, animation: Animation) -> Self {
         Self(Arc::new(Mutex::new(Placement {
             display,
             native_osd,
+            animation,
             rect: None,
             moved_to: None,
         })))
@@ -294,7 +297,11 @@ impl FlyoutApp {
         let (sender, messages) = channel();
         let ctx = cc.egui_ctx.clone();
         let raw = window.raw();
-        let placement = SharedPlacement::new(config.display.clone(), config.general.native_osd);
+        let placement = SharedPlacement::new(
+            config.display.clone(),
+            config.general.native_osd,
+            config.timing.animation,
+        );
         native_osd::start(config.general.native_osd);
         let show_via_egui = options.show_via_egui;
         let send = {
@@ -362,20 +369,32 @@ impl FlyoutApp {
     /// monitor with another display scaling makes Windows and winit resize
     /// it for the new scaling, and they may move it as well; the rectangle
     /// was already computed for that monitor, so placing it again settles.
-    fn keep_in_place(&self) {
+    /// Also moves a sliding flyout along as it fades in or out.
+    fn keep_in_place(&self, now: Instant) {
         // Not while the user moves it, of course.
         if !self.window.is_visible() || window::is_moving() {
             return;
         }
-        let Some(wanted) = self.placement.lock().rect else {
-            return;
+        let wanted = {
+            let placement = self.placement.lock();
+            let Some(rect) = placement.rect else {
+                return;
+            };
+            match placement.animation {
+                Animation::Slide => {
+                    let fraction = layout::slide_fraction(self.timer.opacity(now));
+                    layout::slide(rect, placement.display.anchor, fraction)
+                }
+                Animation::Fade => rect,
+            }
         };
         let Some(actual) = self.window.rect() else {
             return;
         };
         if actual != wanted {
             // A position that differs only because the asynchronous move is
-            // still on its way is not worth a line; a different size is.
+            // still on its way, or because the flyout slides, is not worth
+            // a line; a different size is.
             if (actual.width(), actual.height()) != (wanted.width(), wanted.height()) {
                 log::info!("the window was resized to {actual:?}; putting it back to {wanted:?}");
             }
@@ -476,6 +495,7 @@ fn send(
             let mut placement = placement.lock();
             placement.display = config.display.clone();
             placement.native_osd = config.general.native_osd;
+            placement.animation = config.timing.animation;
             // New settings place the flyout anew (a remembered drag comes
             // back here as new settings too).
             placement.moved_to = None;
@@ -487,9 +507,23 @@ fn send(
         return; // The window is closing.
     }
     if show && let Some(rect) = placement.next_rect() {
-        // With --show-via-egui, egui shows the window once it has the
-        // message; it is only moved here.
-        window::place_from_any_thread(raw, rect, !show_via_egui);
+        if window::is_visible(raw) {
+            // Shown already: the UI thread puts it where it belongs now
+            // (`keep_in_place`), also in the middle of a slide.
+        } else {
+            // A sliding flyout starts out of place.
+            let (anchor, animation) = {
+                let placement = placement.lock();
+                (placement.display.anchor, placement.animation)
+            };
+            let start = match animation {
+                Animation::Slide => layout::slide(rect, anchor, 1.0),
+                Animation::Fade => rect,
+            };
+            // With --show-via-egui, egui shows the window once it has the
+            // message; it is only moved here.
+            window::place_from_any_thread(raw, start, !show_via_egui);
+        }
     }
     ctx.request_repaint();
 }
@@ -541,7 +575,7 @@ impl eframe::App for FlyoutApp {
         if window::take_move_ended() {
             self.finish_move();
         }
-        self.keep_in_place();
+        self.keep_in_place(now);
         // A pinned flyout stays, and so does one under the mouse pointer
         // (to reach its buttons).
         if self.timer.is_active(now) {

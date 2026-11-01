@@ -279,6 +279,28 @@ pub fn display_for(
     result
 }
 
+/// Where the flyout is drawn while it slides in or out: `rect` (where it
+/// rests) moved towards the edge of the screen its anchor is at, by
+/// `fraction` (0.0 = at rest, 1.0 = the farthest) of a sixth of its height.
+/// A centered flyout comes from below.
+pub fn slide(rect: PixelRect, anchor: Anchor, fraction: f32) -> PixelRect {
+    let distance = (rect.height() as f32 / 6.0 * fraction.clamp(0.0, 1.0)).round() as i32;
+    let (column, row) = anchor_grid(anchor);
+    let (dx, dy) = match (column, row) {
+        (_, Edge::Start) => (0, -1),
+        (_, Edge::End) | (Edge::Center, Edge::Center) => (0, 1),
+        (Edge::Start, Edge::Center) => (-1, 0),
+        (Edge::End, Edge::Center) => (1, 0),
+    };
+    rect.translated(dx * distance, dy * distance)
+}
+
+/// How far out of place a sliding flyout is at `opacity` (its fade): far
+/// when nearly invisible, and slowing down as it settles (an ease-out).
+pub fn slide_fraction(opacity: f32) -> f32 {
+    (1.0 - opacity.clamp(0.0, 1.0)).powi(3)
+}
+
 /// Where along one axis an anchor lies.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Edge {
@@ -543,5 +565,21 @@ mod tests {
             display_for(rect, &primary, &monitors, None).anchor,
             Anchor::TopLeft
         );
+    }
+
+    #[test]
+    fn a_sliding_flyout_comes_from_its_edge() {
+        let rect = PixelRect::from_origin_size(100, 200, 400, 168);
+        // At rest, and a sixth of the height (28 pixels) away at most.
+        assert_eq!(slide(rect, Anchor::TopRight, 0.0), rect);
+        assert_eq!(slide(rect, Anchor::TopRight, 1.0), rect.translated(0, -28));
+        assert_eq!(slide(rect, Anchor::Bottom, 1.0), rect.translated(0, 28));
+        assert_eq!(slide(rect, Anchor::Left, 0.5), rect.translated(-14, 0));
+        assert_eq!(slide(rect, Anchor::Right, 1.0), rect.translated(28, 0));
+        assert_eq!(slide(rect, Anchor::Center, 1.0), rect.translated(0, 28));
+        // Out of place when invisible, settled when opaque, slowing down.
+        assert_eq!(slide_fraction(0.0), 1.0);
+        assert_eq!(slide_fraction(1.0), 0.0);
+        assert!(slide_fraction(0.5) < 0.5);
     }
 }

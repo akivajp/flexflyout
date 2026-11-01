@@ -57,3 +57,7 @@ remember_drag = false
 fade_in_ms = 150
 hold_ms = 3000
 fade_out_ms = 400
+
+# "slide": also slide in from the nearest edge of the screen while fading
+# in, and back out while fading out. "fade": only fade, in place.
+animation = "slide"

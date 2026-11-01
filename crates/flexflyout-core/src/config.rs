@@ -224,6 +224,20 @@ pub struct TimingConfig {
     pub hold_ms: u64,
     /// From fully opaque to invisible (0 = vanish at once).
     pub fade_out_ms: u64,
+    /// How the flyout comes and goes, besides fading.
+    pub animation: Animation,
+}
+
+/// How the flyout comes and goes, besides fading.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum Animation {
+    /// It slides in from the nearest edge of the screen while fading in,
+    /// and back out while fading out.
+    #[default]
+    Slide,
+    /// It only fades, in place.
+    Fade,
 }
 
 impl Default for TimingConfig {
@@ -233,6 +247,7 @@ impl Default for TimingConfig {
             fade_in_ms: timing.fade_in.as_millis() as u64,
             hold_ms: timing.hold.as_millis() as u64,
             fade_out_ms: timing.fade_out.as_millis() as u64,
+            animation: Animation::default(),
         }
     }
 }
