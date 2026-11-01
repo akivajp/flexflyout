@@ -3,12 +3,14 @@
 //! while it is shown.
 
 use std::path::PathBuf;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use anyhow::Context as _;
 use flexflyout_core::config::{Animation, Monitor};
 use flexflyout_core::layout::{self, PixelRect};
-use flexflyout_core::{Command, Config};
+use flexflyout_core::{Change, Command, Config};
 use flexflyout_ui::{BASE_SIZE, Labels};
 use smithay_client_toolkit::reexports::calloop::EventLoop;
 use smithay_client_toolkit::reexports::calloop::channel::{self, Sender};
@@ -17,8 +19,10 @@ use wayland_client::Connection;
 use wayland_client::globals::registry_queue_init;
 
 use crate::flyout::{FlyoutState, Received};
-use crate::message::Message;
+use crate::message::{Message, Trigger};
 use crate::platform::linux::layer::{self, Wayland};
+use crate::platform::linux::media::{self, Media};
+use crate::platform::linux::volume::{self, VolumeControl};
 
 /// Time between frames while the flyout fades or slides.
 const FRAME: Duration = Duration::from_millis(16);
@@ -36,13 +40,21 @@ pub struct Options {
     pub demo: Option<u32>,
 }
 
+/// What the flyout's controls act on (not in the demo).
+struct Controls {
+    /// The current player.
+    media: Media,
+    /// The volume of the default output device.
+    volume: VolumeControl,
+}
+
 /// The state of the event loop.
 struct Host {
     wayland: Wayland,
     state: FlyoutState,
     ctx: egui::Context,
-    /// Whether this is the demo (no player, no device).
-    demo: bool,
+    /// `None` in the demo, where the controls change the flyout only.
+    controls: Option<Controls>,
     exit: bool,
     /// Why and when the flyout was last asked to show, until it is drawn.
     pending: Option<(crate::message::Trigger, Instant)>,
@@ -77,19 +89,25 @@ pub fn run(labels: Labels, config: Config, options: Options) -> anyhow::Result<(
     let fonts = flexflyout_ui::fonts::install(&ctx, crate::platform::linux::fonts::find());
     log::info!("fonts: {fonts:?}");
 
-    watch_settings(&options, &config, sender.clone());
-    match options.demo {
-        Some(cycles) => crate::demo::spawn(cycles, move |message| {
-            let _ = sender.send(message);
-        }),
-        None => log::warn!("following the player and the volume is not there yet on Linux"),
-    }
+    // Read by the player's thread, which decides whether to show.
+    let show_on_play_pause = Arc::new(AtomicBool::new(config.general.show_on_play_pause));
+    watch_settings(&options, &config, &show_on_play_pause, sender.clone());
+    let send = move |message: Message| {
+        let _ = sender.send(message);
+    };
+    let controls = match options.demo {
+        Some(cycles) => {
+            crate::demo::spawn(cycles, send);
+            None
+        }
+        None => Some(start_sources(send, show_on_play_pause)),
+    };
 
     let mut host = Host {
         wayland,
         state: FlyoutState::new(labels, config),
         ctx,
-        demo: options.demo.is_some(),
+        controls,
         exit: false,
         pending: None,
     };
@@ -198,10 +216,44 @@ impl Host {
 
     /// Carries out a control: the flyout's own part, then the platform's.
     fn carry_out(&mut self, command: Command, now: Instant) {
-        if let Some(command) = self.state.carry_out(command, now, self.demo) {
-            log::info!("not carried out on Linux yet: {command:?}");
+        let demo = self.controls.is_none();
+        let Some(command) = self.state.carry_out(command, now, demo) else {
+            return;
+        };
+        match (command, &self.controls) {
+            (Command::StartMove, _) => log::info!("moving the flyout is not there yet on Linux"),
+            (Command::SetVolume(level), Some(controls)) => controls.volume.set_level(level),
+            (Command::ToggleMute, Some(controls)) => controls.volume.toggle_mute(),
+            (_, Some(controls)) => controls.media.command(command),
+            (_, None) => {}
         }
     }
+}
+
+/// Starts following the players and the volume. Returns what the flyout's
+/// controls act on.
+fn start_sources(
+    send: impl Fn(Message) + Clone + Send + 'static,
+    show_on_play_pause: Arc<AtomicBool>,
+) -> Controls {
+    let to_flyout = send.clone();
+    let volume = volume::spawn(move |volume, changed| {
+        to_flyout(Message::Volume(volume));
+        if changed {
+            to_flyout(Message::show(Trigger::VolumeChange));
+        }
+    });
+    let media = media::spawn(move |now_playing, change| {
+        send(Message::NowPlaying(now_playing));
+        match change {
+            Change::NewTrack => send(Message::show(Trigger::TrackChange)),
+            Change::PlayPause if show_on_play_pause.load(Ordering::Relaxed) => {
+                send(Message::show(Trigger::PlayPause));
+            }
+            Change::PlayPause | Change::Other => {}
+        }
+    });
+    Controls { media, volume }
 }
 
 /// The earlier of two optional waits.
@@ -214,11 +266,18 @@ fn earliest(a: Option<Duration>, b: Option<Duration>) -> Option<Duration> {
 
 /// Sends the settings to the flyout every time the file is saved, with the
 /// texts in the new language when that changed.
-fn watch_settings(options: &Options, config: &Config, sender: Sender<Message>) {
+fn watch_settings(
+    options: &Options,
+    config: &Config,
+    show_on_play_pause: &Arc<AtomicBool>,
+    sender: Sender<Message>,
+) {
     let lang = options.lang.clone();
     let mut language = crate::settings::language(lang.as_deref(), config);
+    let show_on_play_pause = Arc::clone(show_on_play_pause);
     // The handle to reload on demand is for the tray, which comes later.
     let _ = crate::settings::watch(options.config_file.clone(), move |config| {
+        show_on_play_pause.store(config.general.show_on_play_pause, Ordering::Relaxed);
         let new_language = crate::settings::language(lang.as_deref(), &config);
         let labels = (new_language != language)
             .then(|| match crate::i18n::load(new_language.as_deref()) {

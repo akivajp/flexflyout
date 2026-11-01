@@ -34,8 +34,6 @@ pub enum Message {
 
 /// Why the flyout is shown (for the log).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-// The Linux host follows only the demo so far.
-#[cfg_attr(target_os = "linux", allow(dead_code))]
 pub enum Trigger {
     /// A volume key was pressed.
     // Only the Windows host watches the keys.
@@ -51,12 +49,13 @@ pub enum Trigger {
     /// The player started or paused.
     PlayPause,
     /// The tray icon was clicked.
+    // The Linux host has no tray icon yet.
+    #[cfg_attr(target_os = "linux", allow(dead_code))]
     Tray,
     /// The demo.
     Demo,
 }
 
-#[cfg_attr(target_os = "linux", allow(dead_code))]
 impl Message {
     /// A [`Message::Show`] sent now.
     pub fn show(trigger: Trigger) -> Self {

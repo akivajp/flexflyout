@@ -16,13 +16,13 @@ use std::time::Instant;
 use eframe::egui;
 use flexflyout_core::config::{Animation, Display, Monitor, NativeOsd};
 use flexflyout_core::layout::{self, MonitorArea, PixelRect};
-use flexflyout_core::{Command, Config};
+use flexflyout_core::{Change, Command, Config};
 use flexflyout_ui::{BASE_SIZE, Labels};
 
 use crate::flyout::{FlyoutState, Received};
 use crate::i18n::TrayLabels;
 use crate::platform::windows::keys::{self, Key};
-use crate::platform::windows::media::{self, Change, Media};
+use crate::platform::windows::media::{self, Media};
 use crate::platform::windows::tray::{self, TrayCommand};
 use crate::platform::windows::volume::{self, VolumeControl};
 use crate::platform::windows::window::{self, FlyoutWindow};

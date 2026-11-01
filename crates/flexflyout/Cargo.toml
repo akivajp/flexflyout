@@ -65,13 +65,20 @@ windows = { version = "0.62", features = [
 [target.'cfg(target_os = "linux")'.dependencies]
 egui = "0.37"
 egui-wgpu = "0.37"
+# Cover art from players' files or the web addresses they give (Spotify).
+image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp"] }
 pollster = "0.4"
+# The sound server's own protocol (PulseAudio, and PipeWire through it).
+pulseaudio = "0.3"
 raw-window-handle = "0.6.2"
 smithay-client-toolkit = { version = "0.21", default-features = false, features = ["calloop", "system"] }
 # libwayland is opened at run time (wgpu needs its C objects).
 wayland-backend = { version = "0.3", features = ["client_system", "dlopen"] }
 wayland-client = "0.31"
 wgpu = { version = "30", default-features = false, features = ["std", "wgsl", "vulkan", "gles"] }
+ureq = "3"
+# MPRIS, the players' D-Bus interface.
+zbus = "5"
 
 # Embeds the icon and the version information in the executable. Only when
 # building on Windows, where the resource compiler is (CI and releases);

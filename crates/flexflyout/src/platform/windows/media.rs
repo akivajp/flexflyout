@@ -12,7 +12,7 @@ use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender, channel};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use anyhow::Context as _;
-use flexflyout_core::{Command, Cover, NowPlaying, PlaybackStatus, RepeatMode, Timeline};
+use flexflyout_core::{Change, Command, Cover, NowPlaying, PlaybackStatus, RepeatMode, Timeline};
 use windows::Foundation::{DateTime, TypedEventHandler};
 use windows::Graphics::Imaging::{
     BitmapAlphaMode, BitmapDecoder, BitmapInterpolationMode, BitmapPixelFormat, BitmapTransform,
@@ -44,19 +44,6 @@ const SECONDS_1601_TO_1970: i64 = 11_644_473_600;
 /// Receives the current track (`None` when no player reports one) and
 /// what changed.
 type Sink = Box<dyn Fn(Option<NowPlaying>, Change) + Send>;
-
-/// What changed in an update of the current track.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Change {
-    /// A different, named track (a reason to show the flyout).
-    NewTrack,
-    /// The same track started or paused (a reason to show, if the settings
-    /// say so).
-    PlayPause,
-    /// Anything else: the position, a late cover art, the repeat mode, the
-    /// player closing.
-    Other,
-}
 
 /// What the media thread is asked to do.
 #[derive(Debug)]
@@ -195,18 +182,7 @@ fn run(
         if new == track {
             continue;
         }
-        let change = match (&track, &new) {
-            (_, Some(new)) if new.title.is_empty() => Change::Other,
-            (Some(old), Some(new)) if old.same_track(new) => {
-                if old.status != new.status {
-                    Change::PlayPause
-                } else {
-                    Change::Other
-                }
-            }
-            (_, Some(_)) => Change::NewTrack,
-            (_, None) => Change::Other,
-        };
+        let change = Change::between(track.as_ref(), new.as_ref());
         // The position changes on every seek and with some players every
         // second: not worth a line of its own.
         if change != Change::Other || !same_but_timeline(track.as_ref(), new.as_ref()) {

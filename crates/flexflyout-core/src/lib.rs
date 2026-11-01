@@ -69,6 +69,37 @@ impl NowPlaying {
     }
 }
 
+/// What changed between two reports of the current track.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Change {
+    /// A different, named track (a reason to show the flyout).
+    NewTrack,
+    /// The same track started or paused (a reason to show, if the settings
+    /// say so).
+    PlayPause,
+    /// Anything else: the position, a late cover art, the repeat mode, the
+    /// player closing.
+    Other,
+}
+
+impl Change {
+    /// What changed from `old` to `new` (`None`: no player).
+    pub fn between(old: Option<&NowPlaying>, new: Option<&NowPlaying>) -> Self {
+        match (old, new) {
+            (_, Some(new)) if new.title.is_empty() => Self::Other,
+            (Some(old), Some(new)) if old.same_track(new) => {
+                if old.status != new.status {
+                    Self::PlayPause
+                } else {
+                    Self::Other
+                }
+            }
+            (_, Some(_)) => Self::NewTrack,
+            (_, None) => Self::Other,
+        }
+    }
+}
+
 /// Position and length of the current track.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Timeline {
@@ -216,6 +247,35 @@ mod tests {
         assert_eq!(track.position_at(later), Some(Duration::from_secs(10)));
         track.timeline = None;
         assert_eq!(track.position_at(later), None);
+    }
+
+    #[test]
+    fn changes_are_told_apart() {
+        let track = |title: &str, status| NowPlaying {
+            title: title.into(),
+            status,
+            ..NowPlaying::default()
+        };
+        let playing = track("A", PlaybackStatus::Playing);
+        let paused = track("A", PlaybackStatus::Paused);
+        let other = track("B", PlaybackStatus::Playing);
+        let untitled = track("", PlaybackStatus::Playing);
+        assert_eq!(Change::between(None, Some(&playing)), Change::NewTrack);
+        assert_eq!(
+            Change::between(Some(&playing), Some(&other)),
+            Change::NewTrack
+        );
+        assert_eq!(
+            Change::between(Some(&playing), Some(&paused)),
+            Change::PlayPause
+        );
+        assert_eq!(
+            Change::between(Some(&playing), Some(&playing)),
+            Change::Other
+        );
+        assert_eq!(Change::between(Some(&playing), None), Change::Other);
+        // A player that has not told the title yet.
+        assert_eq!(Change::between(None, Some(&untitled)), Change::Other);
     }
 
     #[test]
