@@ -59,6 +59,20 @@ windows = { version = "0.62", features = [
     "Win32_UI_WindowsAndMessaging",
 ] }
 
+# The Linux host (Wayland, layer-shell): smithay-client-toolkit for the
+# compositor, egui-wgpu for drawing. Everything is pure Rust or opened at
+# run time, so no development packages are needed to build.
+[target.'cfg(target_os = "linux")'.dependencies]
+egui = "0.37"
+egui-wgpu = "0.37"
+pollster = "0.4"
+raw-window-handle = "0.6.2"
+smithay-client-toolkit = { version = "0.21", default-features = false, features = ["calloop", "system"] }
+# libwayland is opened at run time (wgpu needs its C objects).
+wayland-backend = { version = "0.3", features = ["client_system", "dlopen"] }
+wayland-client = "0.31"
+wgpu = { version = "30", default-features = false, features = ["std", "wgsl", "vulkan", "gles"] }
+
 # Embeds the icon and the version information in the executable. Only when
 # building on Windows, where the resource compiler is (CI and releases);
 # cross builds from Linux go without them.

@@ -11,14 +11,18 @@
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 
 mod console;
+mod flyout;
 mod i18n;
+mod message;
 mod settings;
 
 #[cfg(windows)]
 mod app;
-#[cfg(windows)]
+#[cfg(any(windows, target_os = "linux"))]
 mod demo;
-#[cfg(windows)]
+#[cfg(target_os = "linux")]
+mod linux_app;
+#[cfg(any(windows, target_os = "linux"))]
 mod platform;
 #[cfg(windows)]
 mod settings_window;
@@ -126,10 +130,22 @@ fn run(cli: Cli) -> anyhow::Result<()> {
             },
         )
     }
-    #[cfg(not(windows))]
+    #[cfg(target_os = "linux")]
     {
-        let _ = (labels, config_file);
-        anyhow::bail!("FlexFlyout runs only on Windows for now")
+        linux_app::run(
+            labels,
+            config,
+            linux_app::Options {
+                config_file,
+                lang: cli.lang,
+                demo: cli.demo.then_some(cli.cycles),
+            },
+        )
+    }
+    #[cfg(not(any(windows, target_os = "linux")))]
+    {
+        let _ = (labels, config, config_file);
+        anyhow::bail!("FlexFlyout runs only on Windows and Linux for now")
     }
 }
 

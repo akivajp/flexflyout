@@ -1,0 +1,724 @@
+//! The flyout's window on Wayland: a layer-shell surface (above the other
+//! windows, never taking the keyboard focus), drawn by egui through wgpu.
+//!
+//! winit, and so eframe, cannot make layer-shell surfaces, so this module
+//! talks to the compositor with smithay-client-toolkit and feeds egui its
+//! input itself. KDE Plasma (KWin), sway, Hyprland and other wlroots
+//! compositors offer layer-shell; GNOME does not.
+//!
+//! The surface exists only while the flyout is shown: showing creates it,
+//! hiding destroys it (and its wgpu surface). The wgpu device and egui's
+//! renderer are kept.
+
+use std::ptr::NonNull;
+use std::time::Instant;
+
+use anyhow::Context as _;
+use flexflyout_core::config::{Anchor, Display};
+use raw_window_handle::{
+    DisplayHandle, HandleError, HasDisplayHandle, RawDisplayHandle, RawWindowHandle,
+    WaylandDisplayHandle, WaylandWindowHandle,
+};
+use smithay_client_toolkit::compositor::{CompositorHandler, CompositorState};
+use smithay_client_toolkit::output::{OutputHandler, OutputState};
+use smithay_client_toolkit::registry::{ProvidesRegistryState, RegistryState};
+use smithay_client_toolkit::seat::pointer::{PointerEvent, PointerEventKind, PointerHandler};
+use smithay_client_toolkit::seat::{Capability, SeatHandler, SeatState};
+use smithay_client_toolkit::shell::WaylandSurface;
+use smithay_client_toolkit::shell::wlr_layer::{
+    self, KeyboardInteractivity, Layer, LayerShell, LayerShellHandler, LayerSurface,
+    LayerSurfaceConfigure,
+};
+use smithay_client_toolkit::{delegate_registry, registry_handlers};
+use wayland_client::globals::GlobalList;
+use wayland_client::protocol::{wl_output, wl_pointer, wl_seat, wl_surface};
+use wayland_client::{Connection, Proxy, QueueHandle};
+
+/// Mouse buttons in Linux input event codes.
+const BTN_LEFT: u32 = 0x110;
+const BTN_RIGHT: u32 = 0x111;
+const BTN_MIDDLE: u32 = 0x112;
+
+/// Where and how large the flyout is, in the compositor's logical pixels.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Placement {
+    /// Size of the surface.
+    pub width: u32,
+    pub height: u32,
+    /// The edges the surface is anchored to.
+    pub anchor: wlr_layer::Anchor,
+    /// Distances from the edges: top, right, bottom, left.
+    pub margins: (i32, i32, i32, i32),
+    /// The output (monitor) by its index in the compositor's list, or
+    /// `None` to let the compositor choose (KWin: the active one).
+    pub output: Option<usize>,
+}
+
+/// Where the flyout goes for the placement settings, `size` (logical
+/// pixels) and `slide` (how far out of place a sliding flyout is, as a
+/// distance in logical pixels towards its edge; see `layout::slide`).
+///
+/// Next to an edge, the surface is anchored to it and the offset is the
+/// margin. Along a centered axis it is anchored to both edges, so that the
+/// compositor centers it, and the offset becomes twice the margin on the
+/// side it moves away from (the margins narrow the area it is centered
+/// in). The compositor keeps it clear of panels (their exclusive zones).
+pub fn placement(display: &Display, size: (u32, u32), slide: (i32, i32)) -> Placement {
+    use wlr_layer::Anchor as A;
+    let (column, row) = edges(display.anchor);
+    // One axis: the anchor flags and the margins at its start and end.
+    let axis = |edge: Edge, offset: i32, slide: i32, start: A, end: A| match edge {
+        Edge::Start => (start, offset + slide, 0),
+        Edge::End => (end, 0, offset - slide),
+        Edge::Center => {
+            let shift = offset + slide;
+            (start | end, (2 * shift).max(0), (-2 * shift).max(0))
+        }
+    };
+    let (horizontal, left, right) = axis(column, display.offset_x, slide.0, A::LEFT, A::RIGHT);
+    let (vertical, top, bottom) = axis(row, display.offset_y, slide.1, A::TOP, A::BOTTOM);
+    Placement {
+        width: size.0,
+        height: size.1,
+        anchor: horizontal | vertical,
+        margins: (top, right, bottom, left),
+        output: None,
+    }
+}
+
+/// Where along one axis an anchor lies.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Edge {
+    Start,
+    Center,
+    End,
+}
+
+/// The column and the row of an anchor.
+fn edges(anchor: Anchor) -> (Edge, Edge) {
+    use Edge::*;
+    match anchor {
+        Anchor::TopLeft => (Start, Start),
+        Anchor::Top => (Center, Start),
+        Anchor::TopRight => (End, Start),
+        Anchor::Left => (Start, Center),
+        Anchor::Center => (Center, Center),
+        Anchor::Right => (End, Center),
+        Anchor::BottomLeft => (Start, End),
+        Anchor::Bottom => (Center, End),
+        Anchor::BottomRight => (End, End),
+    }
+}
+
+/// The compositor connection, as wgpu wants it for OpenGL.
+#[derive(Debug)]
+struct DisplayPointer(NonNull<std::ffi::c_void>);
+
+// SAFETY: the pointer is only handed to the graphics driver, which may use
+// it from any thread; the connection outlives the wgpu instance.
+unsafe impl Send for DisplayPointer {}
+// SAFETY: as above.
+unsafe impl Sync for DisplayPointer {}
+
+impl HasDisplayHandle for DisplayPointer {
+    fn display_handle(&self) -> Result<DisplayHandle<'_>, HandleError> {
+        let raw = RawDisplayHandle::Wayland(WaylandDisplayHandle::new(self.0));
+        // SAFETY: the display lives as long as the connection.
+        Ok(unsafe { DisplayHandle::borrow_raw(raw) })
+    }
+}
+
+/// The GPU objects, made when the flyout is first shown.
+struct Gpu {
+    adapter: wgpu::Adapter,
+    device: wgpu::Device,
+    queue: wgpu::Queue,
+    renderer: egui_wgpu::Renderer,
+    format: wgpu::TextureFormat,
+}
+
+/// The surface while the flyout is shown.
+struct Shown {
+    /// Dropped before `layer`: the wgpu surface draws into it.
+    target: Option<wgpu::Surface<'static>>,
+    layer: LayerSurface,
+    placement: Placement,
+    /// Whether the compositor has sized it (only then can it be drawn).
+    configured: bool,
+    /// The output's integer scale (buffer pixels per logical pixel).
+    scale: i32,
+}
+
+/// The Wayland side of the flyout.
+pub struct Wayland {
+    connection: Connection,
+    queue: QueueHandle<Wayland>,
+    registry: RegistryState,
+    outputs: OutputState,
+    seats: SeatState,
+    compositor: CompositorState,
+    layer_shell: LayerShell,
+    pointer: Option<wl_pointer::WlPointer>,
+    instance: wgpu::Instance,
+    gpu: Option<Gpu>,
+    shown: Option<Shown>,
+    /// Input for egui since the last frame.
+    events: Vec<egui::Event>,
+    /// Whether the mouse pointer is on the surface.
+    pointer_inside: bool,
+    /// The zoom (the scale setting), to turn logical pixels into points.
+    zoom: f32,
+    started: Instant,
+}
+
+impl Wayland {
+    /// Binds the compositor's globals. Fails without layer-shell (GNOME).
+    pub fn new(
+        connection: Connection,
+        globals: &GlobalList,
+        queue: QueueHandle<Wayland>,
+    ) -> anyhow::Result<Self> {
+        let compositor = CompositorState::bind(globals, &queue)
+            .context("the compositor has no wl_compositor")?;
+        let layer_shell = LayerShell::bind(globals, &queue).context(
+            "the compositor does not offer layer-shell (KDE Plasma, sway and Hyprland do; GNOME does not)",
+        )?;
+        let display = DisplayPointer(
+            NonNull::new(connection.backend().display_ptr().cast())
+                .context("no libwayland display")?,
+        );
+        let instance = wgpu::Instance::new(
+            wgpu::InstanceDescriptor::new_with_display_handle_from_env(Box::new(display)),
+        );
+        Ok(Self {
+            registry: RegistryState::new(globals),
+            outputs: OutputState::new(globals, &queue),
+            seats: SeatState::new(globals, &queue),
+            connection,
+            queue,
+            compositor,
+            layer_shell,
+            pointer: None,
+            instance,
+            gpu: None,
+            shown: None,
+            events: Vec::new(),
+            pointer_inside: false,
+            zoom: 1.0,
+            started: Instant::now(),
+        })
+    }
+
+    /// Whether the mouse pointer rests on the flyout.
+    pub fn pointer_inside(&self) -> bool {
+        self.shown.is_some() && self.pointer_inside
+    }
+
+    /// The outputs' names, in the order [`Placement::output`] counts them.
+    pub fn output_names(&self) -> Vec<String> {
+        self.outputs
+            .outputs()
+            .map(|output| {
+                self.outputs
+                    .info(&output)
+                    .and_then(|info| info.name.clone())
+                    .unwrap_or_default()
+            })
+            .collect()
+    }
+
+    /// Shows the flyout at `placement`, or moves it there if it is shown.
+    pub fn show(&mut self, placement: Placement, zoom: f32) {
+        self.zoom = zoom;
+        if let Some(shown) = &mut self.shown {
+            // An output change needs a new surface (a layer surface's
+            // output is fixed).
+            if shown.placement.output == placement.output {
+                if shown.placement != placement {
+                    apply(&shown.layer, &placement);
+                    shown.layer.commit();
+                    shown.placement = placement;
+                }
+                return;
+            }
+            self.hide();
+        }
+        let output = placement.output.and_then(|i| self.outputs.outputs().nth(i));
+        let surface = self.compositor.create_surface(&self.queue);
+        let layer = self.layer_shell.create_layer_surface(
+            &self.queue,
+            surface,
+            Layer::Overlay,
+            Some("flexflyout"),
+            output.as_ref(),
+        );
+        layer.set_keyboard_interactivity(KeyboardInteractivity::None);
+        apply(&layer, &placement);
+        // The first commit carries no buffer; the compositor answers with
+        // a configure, after which the surface can be drawn.
+        layer.commit();
+        self.shown = Some(Shown {
+            target: None,
+            layer,
+            placement,
+            configured: false,
+            scale: 1,
+        });
+    }
+
+    /// Hides the flyout (destroys its surface).
+    pub fn hide(&mut self) {
+        if let Some(mut shown) = self.shown.take() {
+            shown.target = None;
+            drop(shown);
+            self.pointer_inside = false;
+            let _ = self.connection.flush();
+        }
+    }
+
+    /// Draws a frame with `ui` (on top of a transparent background) if the
+    /// surface is ready. Returns egui's output, for the repaint request.
+    pub fn draw(
+        &mut self,
+        ctx: &egui::Context,
+        ui: impl FnMut(&mut egui::Ui),
+    ) -> Option<egui::FullOutput> {
+        let shown = self.shown.as_mut()?;
+        if !shown.configured {
+            return None;
+        }
+        if shown.target.is_none() {
+            match make_target(
+                &self.instance,
+                &self.connection,
+                &shown.layer,
+                &mut self.gpu,
+            ) {
+                Ok(target) => shown.target = Some(target),
+                Err(err) => {
+                    log::error!("cannot draw the flyout: {err:#}");
+                    return None;
+                }
+            }
+            configure_target(shown, self.gpu.as_ref()?);
+        }
+        let gpu = self.gpu.as_mut()?;
+        let target = shown.target.as_ref()?;
+        let scale = shown.scale as f32;
+        let size_points = egui::vec2(
+            shown.placement.width as f32 / self.zoom,
+            shown.placement.height as f32 / self.zoom,
+        );
+        let mut input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, size_points)),
+            time: Some(self.started.elapsed().as_secs_f64()),
+            focused: true,
+            events: std::mem::take(&mut self.events),
+            ..Default::default()
+        };
+        if let Some(viewport) = input.viewports.get_mut(&egui::ViewportId::ROOT) {
+            viewport.native_pixels_per_point = Some(scale);
+        }
+        ctx.set_zoom_factor(self.zoom);
+        let output = ctx.run_ui(input, ui);
+
+        let frame = match target.get_current_texture() {
+            wgpu::CurrentSurfaceTexture::Success(frame)
+            | wgpu::CurrentSurfaceTexture::Suboptimal(frame) => frame,
+            wgpu::CurrentSurfaceTexture::Outdated | wgpu::CurrentSurfaceTexture::Lost => {
+                configure_target(shown, gpu);
+                return Some(output);
+            }
+            other => {
+                log::debug!("no frame to draw on: {other:?}");
+                return Some(output);
+            }
+        };
+        let screen = egui_wgpu::ScreenDescriptor {
+            size_in_pixels: [
+                shown.placement.width * shown.scale as u32,
+                shown.placement.height * shown.scale as u32,
+            ],
+            pixels_per_point: output.pixels_per_point,
+        };
+        for (id, deltas) in &output.textures_delta.set {
+            for delta in deltas {
+                gpu.renderer
+                    .update_texture(&gpu.device, &gpu.queue, *id, delta);
+            }
+        }
+        let jobs = ctx.tessellate(output.shapes.clone(), output.pixels_per_point);
+        let view = frame
+            .texture
+            .create_view(&wgpu::TextureViewDescriptor::default());
+        let mut encoder = gpu
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
+        let commands =
+            gpu.renderer
+                .update_buffers(&gpu.device, &gpu.queue, &mut encoder, &jobs, &screen);
+        {
+            let pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("flyout"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &view,
+                    depth_slice: None,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        // Transparent: only the rounded panel shows.
+                        load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                ..Default::default()
+            });
+            gpu.renderer
+                .render(&mut pass.forget_lifetime(), &jobs, &screen);
+        }
+        gpu.queue
+            .submit(commands.into_iter().chain([encoder.finish()]));
+        gpu.queue.present(frame);
+        for id in &output.textures_delta.free {
+            gpu.renderer.free_texture(id);
+        }
+        Some(output)
+    }
+}
+
+/// Sets the size, anchors and margins of a layer surface.
+fn apply(layer: &LayerSurface, placement: &Placement) {
+    let (top, right, bottom, left) = placement.margins;
+    layer.set_size(placement.width, placement.height);
+    layer.set_anchor(placement.anchor);
+    layer.set_margin(top, right, bottom, left);
+}
+
+/// Makes the wgpu surface for a layer surface, and the GPU objects if they
+/// do not exist yet.
+fn make_target(
+    instance: &wgpu::Instance,
+    connection: &Connection,
+    layer: &LayerSurface,
+    gpu: &mut Option<Gpu>,
+) -> anyhow::Result<wgpu::Surface<'static>> {
+    let display = NonNull::new(connection.backend().display_ptr().cast()).context("no display")?;
+    let surface = NonNull::new(layer.wl_surface().id().as_ptr().cast()).context("no surface")?;
+    // SAFETY: the display and the surface outlive the wgpu surface, which
+    // is dropped before the layer surface (see `Shown`).
+    let target = unsafe {
+        instance.create_surface_unsafe(wgpu::SurfaceTargetUnsafe::RawHandle {
+            raw_display_handle: Some(RawDisplayHandle::Wayland(WaylandDisplayHandle::new(
+                display,
+            ))),
+            raw_window_handle: RawWindowHandle::Wayland(WaylandWindowHandle::new(surface)),
+        })
+    }
+    .context("cannot make a wgpu surface")?;
+    if gpu.is_none() {
+        let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
+            compatible_surface: Some(&target),
+            power_preference: wgpu::PowerPreference::LowPower,
+            ..Default::default()
+        }))
+        .context("no graphics adapter")?;
+        log::info!("graphics adapter: {:?}", adapter.get_info());
+        let (device, queue) =
+            pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default()))
+                .context("cannot open the graphics device")?;
+        let capabilities = target.get_capabilities(&adapter);
+        // egui draws in sRGB-encoded colors: a non-sRGB format, as eframe
+        // picks.
+        let format = capabilities
+            .formats
+            .iter()
+            .copied()
+            .find(|format| !format.is_srgb())
+            .or(capabilities.formats.first().copied())
+            .context("the surface has no format")?;
+        let renderer =
+            egui_wgpu::Renderer::new(&device, format, egui_wgpu::RendererOptions::default());
+        *gpu = Some(Gpu {
+            adapter,
+            device,
+            queue,
+            renderer,
+            format,
+        });
+    }
+    Ok(target)
+}
+
+/// Configures the wgpu surface for the surface's size and scale.
+fn configure_target(shown: &Shown, gpu: &Gpu) {
+    let Some(target) = &shown.target else {
+        return;
+    };
+    let capabilities = target.get_capabilities(&gpu.adapter);
+    // Premultiplied alpha, as egui draws, where the compositor takes it.
+    let alpha_mode = [
+        wgpu::CompositeAlphaMode::PreMultiplied,
+        wgpu::CompositeAlphaMode::PostMultiplied,
+    ]
+    .into_iter()
+    .find(|mode| capabilities.alpha_modes.contains(mode))
+    .unwrap_or(wgpu::CompositeAlphaMode::Auto);
+    shown.layer.wl_surface().set_buffer_scale(shown.scale);
+    target.configure(
+        &gpu.device,
+        &wgpu::SurfaceConfiguration {
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+            format: gpu.format,
+            width: shown.placement.width * shown.scale as u32,
+            height: shown.placement.height * shown.scale as u32,
+            present_mode: wgpu::PresentMode::Fifo,
+            desired_maximum_frame_latency: 2,
+            alpha_mode,
+            view_formats: vec![],
+            color_space: wgpu::SurfaceColorSpace::Auto,
+        },
+    );
+}
+
+impl LayerShellHandler for Wayland {
+    fn closed(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &LayerSurface) {
+        // The compositor dropped it (its output went away): show it anew
+        // next time.
+        self.shown = None;
+    }
+
+    fn configure(
+        &mut self,
+        _: &Connection,
+        _: &QueueHandle<Self>,
+        layer: &LayerSurface,
+        configure: LayerSurfaceConfigure,
+        _serial: u32,
+    ) {
+        let Some(shown) = self.shown.as_mut().filter(|shown| &shown.layer == layer) else {
+            return;
+        };
+        let (width, height) = configure.new_size;
+        if width > 0 && height > 0 {
+            shown.placement.width = width;
+            shown.placement.height = height;
+        }
+        shown.configured = true;
+        if let Some(gpu) = &self.gpu {
+            configure_target(shown, gpu);
+        }
+    }
+}
+
+impl CompositorHandler for Wayland {
+    fn scale_factor_changed(
+        &mut self,
+        _: &Connection,
+        _: &QueueHandle<Self>,
+        surface: &wl_surface::WlSurface,
+        factor: i32,
+    ) {
+        if let Some(shown) = self
+            .shown
+            .as_mut()
+            .filter(|shown| shown.layer.wl_surface() == surface)
+            && shown.scale != factor
+        {
+            shown.scale = factor.max(1);
+            if let Some(gpu) = &self.gpu {
+                configure_target(shown, gpu);
+            }
+        }
+    }
+
+    fn transform_changed(
+        &mut self,
+        _: &Connection,
+        _: &QueueHandle<Self>,
+        _: &wl_surface::WlSurface,
+        _: wl_output::Transform,
+    ) {
+    }
+
+    fn frame(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &wl_surface::WlSurface, _: u32) {}
+
+    fn surface_enter(
+        &mut self,
+        _: &Connection,
+        _: &QueueHandle<Self>,
+        _: &wl_surface::WlSurface,
+        _: &wl_output::WlOutput,
+    ) {
+    }
+
+    fn surface_leave(
+        &mut self,
+        _: &Connection,
+        _: &QueueHandle<Self>,
+        _: &wl_surface::WlSurface,
+        _: &wl_output::WlOutput,
+    ) {
+    }
+}
+
+impl OutputHandler for Wayland {
+    fn output_state(&mut self) -> &mut OutputState {
+        &mut self.outputs
+    }
+
+    fn new_output(&mut self, _: &Connection, _: &QueueHandle<Self>, _: wl_output::WlOutput) {}
+
+    fn update_output(&mut self, _: &Connection, _: &QueueHandle<Self>, _: wl_output::WlOutput) {}
+
+    fn output_destroyed(&mut self, _: &Connection, _: &QueueHandle<Self>, _: wl_output::WlOutput) {}
+}
+
+impl SeatHandler for Wayland {
+    fn seat_state(&mut self) -> &mut SeatState {
+        &mut self.seats
+    }
+
+    fn new_seat(&mut self, _: &Connection, _: &QueueHandle<Self>, _: wl_seat::WlSeat) {}
+
+    fn new_capability(
+        &mut self,
+        _: &Connection,
+        queue: &QueueHandle<Self>,
+        seat: wl_seat::WlSeat,
+        capability: Capability,
+    ) {
+        if capability == Capability::Pointer && self.pointer.is_none() {
+            match self.seats.get_pointer(queue, &seat) {
+                Ok(pointer) => self.pointer = Some(pointer),
+                Err(err) => log::warn!("no mouse pointer: {err}"),
+            }
+        }
+    }
+
+    fn remove_capability(
+        &mut self,
+        _: &Connection,
+        _: &QueueHandle<Self>,
+        _: wl_seat::WlSeat,
+        capability: Capability,
+    ) {
+        if capability == Capability::Pointer
+            && let Some(pointer) = self.pointer.take()
+        {
+            pointer.release();
+        }
+    }
+
+    fn remove_seat(&mut self, _: &Connection, _: &QueueHandle<Self>, _: wl_seat::WlSeat) {}
+}
+
+impl PointerHandler for Wayland {
+    fn pointer_frame(
+        &mut self,
+        _: &Connection,
+        _: &QueueHandle<Self>,
+        _: &wl_pointer::WlPointer,
+        events: &[PointerEvent],
+    ) {
+        let Some(shown) = &self.shown else {
+            return;
+        };
+        for event in events {
+            if &event.surface != shown.layer.wl_surface() {
+                continue;
+            }
+            // Logical pixels to egui points.
+            let pos = egui::pos2(
+                event.position.0 as f32 / self.zoom,
+                event.position.1 as f32 / self.zoom,
+            );
+            match event.kind {
+                PointerEventKind::Enter { .. } => {
+                    self.pointer_inside = true;
+                    self.events.push(egui::Event::PointerMoved(pos));
+                }
+                PointerEventKind::Leave { .. } => {
+                    self.pointer_inside = false;
+                    self.events.push(egui::Event::PointerGone);
+                }
+                PointerEventKind::Motion { .. } => {
+                    self.events.push(egui::Event::PointerMoved(pos));
+                }
+                PointerEventKind::Press { button, .. }
+                | PointerEventKind::Release { button, .. } => {
+                    let button = match button {
+                        BTN_LEFT => egui::PointerButton::Primary,
+                        BTN_RIGHT => egui::PointerButton::Secondary,
+                        BTN_MIDDLE => egui::PointerButton::Middle,
+                        _ => continue,
+                    };
+                    self.events.push(egui::Event::PointerButton {
+                        pos,
+                        button,
+                        pressed: matches!(event.kind, PointerEventKind::Press { .. }),
+                        modifiers: egui::Modifiers::NONE,
+                    });
+                }
+                PointerEventKind::Axis { .. } => {}
+            }
+        }
+    }
+}
+
+impl ProvidesRegistryState for Wayland {
+    fn registry(&mut self) -> &mut RegistryState {
+        &mut self.registry
+    }
+    registry_handlers![OutputState, SeatState];
+}
+
+delegate_registry!(Wayland);
+smithay_client_toolkit::delegate_dispatch2!(Wayland);
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use wlr_layer::Anchor as A;
+
+    fn display(anchor: Anchor) -> Display {
+        Display {
+            anchor,
+            offset_x: 24,
+            offset_y: 16,
+            ..Display::default()
+        }
+    }
+
+    #[test]
+    fn corners_are_anchored_to_their_edges() {
+        let p = placement(&display(Anchor::TopRight), (400, 164), (0, 0));
+        assert_eq!(p.anchor, A::TOP | A::RIGHT);
+        assert_eq!(p.margins, (16, 24, 0, 0));
+        let p = placement(&display(Anchor::BottomLeft), (400, 164), (0, 0));
+        assert_eq!(p.anchor, A::BOTTOM | A::LEFT);
+        assert_eq!(p.margins, (0, 0, 16, 24));
+    }
+
+    #[test]
+    fn centered_axes_shift_by_narrowing_one_side() {
+        // Bottom center, 24 to the right: anchored to left and right, with
+        // the left margin twice the offset.
+        let p = placement(&display(Anchor::Bottom), (400, 164), (0, 0));
+        assert_eq!(p.anchor, A::LEFT | A::RIGHT | A::BOTTOM);
+        assert_eq!(p.margins, (0, 0, 16, 48));
+        let left = Display {
+            offset_x: -10,
+            ..display(Anchor::Bottom)
+        };
+        assert_eq!(placement(&left, (400, 164), (0, 0)).margins, (0, 20, 16, 0));
+    }
+
+    #[test]
+    fn sliding_moves_towards_the_edge() {
+        // Top right, sliding 28 up: a smaller top margin.
+        let p = placement(&display(Anchor::TopRight), (400, 164), (0, -28));
+        assert_eq!(p.margins, (-12, 24, 0, 0));
+        // Bottom, sliding 28 down: a smaller bottom margin.
+        let p = placement(&display(Anchor::Bottom), (400, 164), (0, 28));
+        assert_eq!(p.margins, (0, 0, -12, 48));
+    }
+}
