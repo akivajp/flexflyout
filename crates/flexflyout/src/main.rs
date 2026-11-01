@@ -97,6 +97,7 @@ fn run(cli: Cli) -> anyhow::Result<()> {
     {
         app::run(
             labels,
+            i18n::tray_labels(&loader),
             config,
             app::Options {
                 config_file,

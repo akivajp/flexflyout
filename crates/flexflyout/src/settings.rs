@@ -6,6 +6,7 @@
 //! log either way.
 
 use std::path::{Path, PathBuf};
+use std::sync::mpsc::{RecvTimeoutError, Sender, channel};
 use std::thread;
 use std::time::{Duration, SystemTime};
 
@@ -51,21 +52,45 @@ pub fn language(command_line: Option<&str>, config: &Config) -> Option<String> {
         .map(str::to_owned)
 }
 
-/// Calls `on_change` on a thread of its own with the new settings every
-/// time the file is saved and can be read.
+/// Asks the watching thread to read the settings at once.
+#[derive(Clone, Debug)]
 // Only the Windows host reloads its settings so far.
 #[cfg_attr(not(windows), allow(dead_code))]
-pub fn watch(path: PathBuf, mut on_change: impl FnMut(Config) + Send + 'static) {
+pub struct Reload(Sender<()>);
+
+#[cfg_attr(not(windows), allow(dead_code))]
+impl Reload {
+    /// Reads the settings now, even if the file looks unchanged.
+    pub fn now(&self) {
+        let _ = self.0.send(());
+    }
+}
+
+/// Calls `on_change` on a thread of its own with the new settings every
+/// time the file is saved and can be read, or when asked through the
+/// returned [`Reload`].
+#[cfg_attr(not(windows), allow(dead_code))]
+pub fn watch(path: PathBuf, mut on_change: impl FnMut(Config) + Send + 'static) -> Reload {
+    let (reload, requests) = channel();
     let spawned = thread::Builder::new()
         .name("settings".to_owned())
         .spawn(move || {
             let mut seen = stamp(&path);
             loop {
-                thread::sleep(WATCH_INTERVAL);
+                let asked = match requests.recv_timeout(WATCH_INTERVAL) {
+                    Ok(()) => true,
+                    Err(RecvTimeoutError::Timeout) => false,
+                    // No one can ask any more: keep watching the file at the
+                    // same pace (the receive no longer waits).
+                    Err(RecvTimeoutError::Disconnected) => {
+                        thread::sleep(WATCH_INTERVAL);
+                        false
+                    }
+                };
                 let now = stamp(&path);
                 // A missing file keeps the settings in use: it may be in the
                 // middle of being replaced by an editor.
-                if now.is_none() || now == seen {
+                if !asked && (now.is_none() || now == seen) {
                     continue;
                 }
                 seen = now;
@@ -78,6 +103,7 @@ pub fn watch(path: PathBuf, mut on_change: impl FnMut(Config) + Send + 'static) 
     if let Err(err) = spawned {
         log::warn!("cannot watch the settings for changes: {err}");
     }
+    Reload(reload)
 }
 
 /// What tells that the file changed: its modification time and size (the

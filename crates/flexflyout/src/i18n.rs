@@ -37,6 +37,32 @@ pub fn load(lang: Option<&str>) -> anyhow::Result<FluentLanguageLoader> {
     Ok(loader)
 }
 
+/// Texts of the notification area icon's menu.
+#[derive(Clone, Debug)]
+// Only the Windows host has a tray icon so far.
+#[cfg_attr(not(windows), allow(dead_code))]
+pub struct TrayLabels {
+    /// Show the flyout.
+    pub show: String,
+    /// Open the settings file.
+    pub open_settings: String,
+    /// Read the settings again.
+    pub reload_settings: String,
+    /// End the app.
+    pub quit: String,
+}
+
+/// Texts of the tray menu in the loaded language.
+#[cfg_attr(not(windows), allow(dead_code))]
+pub fn tray_labels(loader: &FluentLanguageLoader) -> TrayLabels {
+    TrayLabels {
+        show: fl!(loader, "tray-show"),
+        open_settings: fl!(loader, "tray-open-settings"),
+        reload_settings: fl!(loader, "tray-reload-settings"),
+        quit: fl!(loader, "tray-quit"),
+    }
+}
+
 /// Texts of the flyout panel in the loaded language.
 pub fn labels(loader: &FluentLanguageLoader) -> Labels {
     Labels {
@@ -83,6 +109,7 @@ mod tests {
     fn loads_japanese() {
         let loader = load(Some("ja")).expect("load");
         assert_eq!(labels(&loader).next, "次へ");
+        assert_eq!(tray_labels(&loader).quit, "終了");
     }
 
     #[test]

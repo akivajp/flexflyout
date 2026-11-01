@@ -18,8 +18,10 @@ use flexflyout_core::layout::{self, PixelRect};
 use flexflyout_core::{Config, FlyoutTimer, NowPlaying, Volume};
 use flexflyout_ui::{BASE_SIZE, FlyoutView, Labels};
 
+use crate::i18n::TrayLabels;
 use crate::platform::windows::keys::{self, Key};
 use crate::platform::windows::media::{self, Media};
+use crate::platform::windows::tray::{self, TrayCommand};
 use crate::platform::windows::window::{self, FlyoutWindow};
 use crate::platform::windows::{monitor, volume};
 
@@ -49,7 +51,7 @@ pub enum Message {
         /// The texts again, when the language changed.
         labels: Option<Labels>,
     },
-    /// Close the app (the end of the demo).
+    /// Close the app (Quit in the tray menu, or the end of the demo).
     Quit,
 }
 
@@ -64,6 +66,8 @@ pub enum Trigger {
     VolumeChange,
     /// A different track started.
     TrackChange,
+    /// The tray icon was clicked.
+    Tray,
     /// The demo.
     Demo,
 }
@@ -94,7 +98,12 @@ pub struct Options {
 }
 
 /// Opens the flyout window and runs until it is closed.
-pub fn run(labels: Labels, config: Config, options: Options) -> anyhow::Result<()> {
+pub fn run(
+    labels: Labels,
+    tray_labels: TrayLabels,
+    config: Config,
+    options: Options,
+) -> anyhow::Result<()> {
     // Present through DirectComposition: the default presentation of DirectX
     // 12 cannot show a transparent window. wgpu reads this when it starts.
     // SAFETY: no other thread exists yet (logging and i18n start none).
@@ -112,15 +121,17 @@ pub fn run(labels: Labels, config: Config, options: Options) -> anyhow::Result<(
             .with_resizable(false),
         ..Default::default()
     };
-    eframe::run_native(
+    let result = eframe::run_native(
         "FlexFlyout",
         native_options,
         Box::new(move |cc| {
-            let app = FlyoutApp::new(cc, labels, config, options)?;
+            let app = FlyoutApp::new(cc, labels, tray_labels, config, options)?;
             Ok(Box::new(app))
         }),
     )
-    .map_err(|err| anyhow::anyhow!("the window failed: {err}"))
+    .map_err(|err| anyhow::anyhow!("the window failed: {err}"));
+    tray::remove();
+    result
 }
 
 /// Where the flyout goes, shared by the sources' threads (which place the
@@ -192,6 +203,7 @@ impl FlyoutApp {
     fn new(
         cc: &eframe::CreationContext<'_>,
         labels: Labels,
+        tray_labels: TrayLabels,
         config: Config,
         options: Options,
     ) -> anyhow::Result<Self> {
@@ -228,7 +240,15 @@ impl FlyoutApp {
             let placement = placement.clone();
             move |message: Message| send(&sender, &ctx, raw, &placement, message, show_via_egui)
         };
-        watch_settings(&options, &config, send.clone());
+        let reload = watch_settings(&options, &config, send.clone());
+        let config_file = options.config_file.clone();
+        let to_window = send.clone();
+        tray::spawn(tray_labels, move |command| match command {
+            TrayCommand::Show => to_window(Message::show(Trigger::Tray)),
+            TrayCommand::OpenSettings => tray::open_in_editor(&config_file),
+            TrayCommand::ReloadSettings => reload.now(),
+            TrayCommand::Quit => to_window(Message::Quit),
+        });
         let media = match options.demo {
             Some(cycles) => {
                 crate::demo::spawn(cycles, send);
@@ -316,8 +336,13 @@ fn start_sources(send: impl Fn(Message) + Clone + Send + Sync + 'static) -> Medi
 }
 
 /// Sends the settings to the window every time the file is saved, with the
-/// texts in the new language when that changed.
-fn watch_settings(options: &Options, config: &Config, send: impl Fn(Message) + Send + 'static) {
+/// texts in the new language when that changed. Returns the handle to
+/// reload them on demand.
+fn watch_settings(
+    options: &Options,
+    config: &Config,
+    send: impl Fn(Message) + Send + 'static,
+) -> crate::settings::Reload {
     let lang = options.lang.clone();
     let mut language = crate::settings::language(lang.as_deref(), config);
     crate::settings::watch(options.config_file.clone(), move |config| {
@@ -325,7 +350,10 @@ fn watch_settings(options: &Options, config: &Config, send: impl Fn(Message) + S
         let labels = if new_language != language {
             // A bad language code keeps the texts in use.
             match crate::i18n::load(new_language.as_deref()) {
-                Ok(loader) => Some(crate::i18n::labels(&loader)),
+                Ok(loader) => {
+                    tray::set_labels(crate::i18n::tray_labels(&loader));
+                    Some(crate::i18n::labels(&loader))
+                }
                 Err(err) => {
                     log::error!("{err:#}");
                     None
@@ -341,7 +369,7 @@ fn watch_settings(options: &Options, config: &Config, send: impl Fn(Message) + S
             config: Box::new(config),
             labels,
         });
-    });
+    })
 }
 
 /// Hands a message to the window from a source's thread.
