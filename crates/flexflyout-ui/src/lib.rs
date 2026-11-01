@@ -246,8 +246,10 @@ pub fn draw(ui: &mut Ui, view: &FlyoutView<'_>) -> Option<Command> {
     // Playback buttons. The icons are drawn as shapes rather than text:
     // egui's bundled fonts have no media symbols, and shapes stay sharp at
     // every scale. Shuffle and repeat show whether they are on, and are
-    // grayed out when the player cannot change them.
+    // grayed out when the player cannot change them; all of them are
+    // grayed out when no player is there.
     let playing = track.is_some_and(|t| t.status == PlaybackStatus::Playing);
+    let player = track.is_some().then_some(Color32::WHITE);
     let shuffle = track.and_then(|t| t.shuffle);
     let repeat = track.and_then(|t| t.repeat);
     let toggle_color = |on: Option<bool>| match on {
@@ -265,21 +267,16 @@ pub fn draw(ui: &mut Ui, view: &FlyoutView<'_>) -> Option<Command> {
         (
             Icon::Previous,
             &labels.previous,
-            Some(Color32::WHITE),
+            player,
             Some(Command::Previous),
         ),
         (
             if playing { Icon::Pause } else { Icon::Play },
             &labels.play_pause,
-            Some(Color32::WHITE),
+            player,
             Some(Command::TogglePlayPause),
         ),
-        (
-            Icon::Next,
-            &labels.next,
-            Some(Color32::WHITE),
-            Some(Command::Next),
-        ),
+        (Icon::Next, &labels.next, player, Some(Command::Next)),
         (
             if repeat == Some(RepeatMode::Track) {
                 Icon::RepeatTrack
@@ -830,6 +827,31 @@ mod tests {
             let moved = harness.state().contains(&Command::StartMove);
             assert_eq!(moved, pinned, "pinned: {pinned}");
         }
+    }
+
+    #[test]
+    fn without_a_player_the_playback_buttons_do_nothing() {
+        let labels = labels();
+        let mut harness = Harness::builder().with_size(BASE_SIZE).build_ui_state(
+            |ui, commands: &mut Vec<Command>| {
+                let view = FlyoutView {
+                    now_playing: None,
+                    volume: None,
+                    pinned: false,
+                    now: Instant::now(),
+                    background_opacity: 0.9,
+                    labels: &labels,
+                };
+                commands.extend(draw(ui, &view));
+            },
+            Vec::new(),
+        );
+        harness.get_by_label("Nothing playing");
+        for name in ["Previous", "Play / pause", "Next"] {
+            harness.get_by_label(name).click();
+            harness.run();
+        }
+        assert_eq!(harness.state(), &[]);
     }
 
     #[test]

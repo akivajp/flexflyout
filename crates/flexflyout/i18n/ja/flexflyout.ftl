@@ -55,3 +55,5 @@ settings-animation-slide = 画面の端からすべり込む
 settings-animation-fade = フェードだけ
 settings-open-file = 設定ファイルを開く
 settings-defaults = 既定値に戻す
+settings-website = Web サイト
+settings-sponsor = 開発を支援する

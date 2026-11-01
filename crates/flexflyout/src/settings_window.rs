@@ -284,6 +284,27 @@ impl SettingsWindow {
                     self.config = Config::default();
                 }
             });
+            ui.add_space(16.0);
+            ui.separator();
+            self.about(ui);
+        });
+    }
+
+    /// The version, and links to the project and to supporting it.
+    fn about(&self, ui: &mut egui::Ui) {
+        ui.horizontal_wrapped(|ui| {
+            ui.label(format!("FlexFlyout {}", env!("CARGO_PKG_VERSION")));
+            for (id, url) in [
+                ("settings-website", env!("CARGO_PKG_REPOSITORY")),
+                ("settings-sponsor", "https://buymeacoffee.com/akivajp"),
+            ] {
+                ui.label("·");
+                // Opened by the shell: eframe is built without its own
+                // link opener.
+                if ui.link(self.loader.get(id)).on_hover_text(url).clicked() {
+                    tray::open_url(url);
+                }
+            }
         });
     }
 }

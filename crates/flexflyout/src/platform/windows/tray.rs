@@ -115,6 +115,17 @@ pub fn remove() {
     }
 }
 
+/// Opens `url` in the default browser.
+pub fn open_url(url: &str) {
+    let url = HSTRING::from(url);
+    // SAFETY: a plain shell call with valid strings.
+    let result = unsafe { ShellExecuteW(None, w!("open"), &url, None, None, SW_SHOWNORMAL) };
+    // Values up to 32 are errors.
+    if result.0 as usize <= 32 {
+        log::warn!("cannot open {url}: {}", result.0 as usize);
+    }
+}
+
 /// Opens `path` in the editor Windows associates with its extension, or in
 /// Notepad when there is none (`.toml` has no association by default, and
 /// opening it anyway would ask the user to pick an app).

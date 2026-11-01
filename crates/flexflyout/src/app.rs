@@ -774,15 +774,21 @@ fn open_settings_window(config_file: &std::path::Path, lang: Option<&str>) {
 
 /// Uses the Windows UI fonts so that the flyout looks native: Segoe UI for
 /// Latin text, then a Japanese font (titles can be Japanese whatever the GUI
-/// language is), then egui's own fonts for anything else. Returns the fonts
-/// used and their baseline offsets, for the log.
+/// language is). egui's own fonts are not built in (their licence is not an
+/// OSI one, which code signing for open source asks about), so these are
+/// all the fonts there are. Returns the fonts used and their baseline
+/// offsets, for the log.
 ///
 /// Whole font files stay in memory, so only one per script is loaded for
 /// now. Chinese and Korean fonts can be added on demand later.
 pub(crate) fn setup_fonts(ctx: &egui::Context) -> Vec<(String, f32)> {
     // In order of preference: the first file found in each group is used.
     let groups: [&[&str]; 2] = [
-        &[r"C:\Windows\Fonts\segoeui.ttf"],
+        &[
+            r"C:\Windows\Fonts\segoeui.ttf",
+            r"C:\Windows\Fonts\arial.ttf",
+            r"C:\Windows\Fonts\tahoma.ttf",
+        ],
         &[
             r"C:\Windows\Fonts\YuGothM.ttc",
             r"C:\Windows\Fonts\meiryo.ttc",

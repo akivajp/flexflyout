@@ -55,3 +55,5 @@ settings-animation-slide = Slide in from the edge
 settings-animation-fade = Fade only
 settings-open-file = Open the settings file
 settings-defaults = Restore the defaults
+settings-website = Website
+settings-sponsor = Support the development

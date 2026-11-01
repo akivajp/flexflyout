@@ -7,6 +7,17 @@ include breaking changes).
 
 ## [Unreleased]
 
+### Added
+- The settings window shows the version, with links to the website and to
+  supporting the development.
+
+### Changed
+- The playback buttons are grayed out while no player is there.
+- egui's bundled fonts are no longer built in (their licence is not an OSI
+  one); the flyout uses the Windows fonts (Segoe UI and Yu Gothic, or
+  Arial and Meiryo where they are missing), as before. The executable is
+  about 0.8 MB smaller.
+
 ## [0.2.0] - 2026-11-02
 
 ### Added
