@@ -11,3 +11,9 @@ description = "Platform-independent parts of FlexFlyout: media and volume types,
 publish = false
 
 [dependencies]
+serde = { version = "1.0.229", features = ["derive"] }
+serde_ignored = "0.1.14"
+toml = "1.1.8"
+
+[dev-dependencies]
+tempfile = "3.27.0"

@@ -1,0 +1,508 @@
+//! The settings file (TOML): what it contains, its defaults, and reading it.
+//!
+//! Every key is optional; a missing key takes its default, so an old file
+//! keeps working when new keys arrive. Keys the program does not know (a typo
+//! or a key from a newer version) are not an error but are reported, so that
+//! the host can log them. Values out of their range are clamped, also with a
+//! warning, so a bad number never stops the flyout.
+
+use std::fmt;
+use std::path::Path;
+use std::time::Duration;
+
+use serde::de::{self, Deserializer, Visitor};
+use serde::{Deserialize, Serialize};
+
+use crate::Timing;
+
+/// The settings file written on the first start: the defaults, with a
+/// comment for every key.
+pub const DEFAULT_FILE: &str = include_str!("../default-config.toml");
+
+/// Allowed range of [`Display::scale`].
+pub const SCALE_RANGE: (f32, f32) = (0.25, 4.0);
+
+/// Longest allowed duration of a fade (the hold has no upper limit).
+pub const MAX_FADE_MS: u64 = 10_000;
+
+/// All settings.
+#[derive(Clone, Debug, Default, PartialEq, Deserialize, Serialize)]
+#[serde(default)]
+pub struct Config {
+    /// Settings that are not about the look.
+    pub general: General,
+    /// Where the flyout appears and how it looks.
+    pub display: Display,
+    /// How long the flyout stays and how it fades.
+    pub timing: TimingConfig,
+}
+
+/// Settings that are not about the look.
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+#[serde(default)]
+pub struct General {
+    /// Language of the texts: `"auto"` (the system's) or a code such as
+    /// `"en"` or `"ja"`.
+    pub language: String,
+    /// What to do with the operating system's own volume indicator.
+    pub native_osd: NativeOsd,
+}
+
+impl Default for General {
+    fn default() -> Self {
+        Self {
+            language: "auto".to_owned(),
+            native_osd: NativeOsd::default(),
+        }
+    }
+}
+
+impl General {
+    /// The language code to use, or `None` to follow the system.
+    pub fn language(&self) -> Option<&str> {
+        let lang = self.language.trim();
+        (!lang.is_empty() && !lang.eq_ignore_ascii_case("auto")).then_some(lang)
+    }
+}
+
+/// What to do with the operating system's own volume indicator.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum NativeOsd {
+    /// Leave it, and place the flyout so that the two do not overlap.
+    #[default]
+    Avoid,
+    /// Hide it (only the volume one where the system allows that).
+    Hide,
+    /// Leave it and ignore it (the two may overlap).
+    Keep,
+}
+
+/// Where the flyout appears and how it looks.
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+#[serde(default)]
+pub struct Display {
+    /// The monitor to show the flyout on.
+    pub monitor: Monitor,
+    /// The point of the monitor's work area the flyout is placed at.
+    pub anchor: Anchor,
+    /// Horizontal distance from the anchor in pixels (at 100% scaling of
+    /// the monitor). At a left or right anchor it is measured inwards from
+    /// that edge; at a centered one, positive moves right.
+    pub offset_x: i32,
+    /// Vertical distance from the anchor, like `offset_x`: inwards from the
+    /// top or bottom edge, or downwards at a centered anchor.
+    pub offset_y: i32,
+    /// Size of the flyout relative to its normal size (on top of the
+    /// monitor's own scaling).
+    pub scale: f32,
+    /// Opacity of the panel's background, from 0.0 (invisible) to 1.0.
+    /// The text and the buttons stay opaque.
+    pub opacity: f32,
+}
+
+impl Default for Display {
+    fn default() -> Self {
+        Self {
+            monitor: Monitor::default(),
+            anchor: Anchor::default(),
+            offset_x: 24,
+            offset_y: 24,
+            scale: 1.0,
+            opacity: 0.92,
+        }
+    }
+}
+
+/// The monitor to show the flyout on.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Monitor {
+    /// The primary monitor (the one with the taskbar's clock on Windows).
+    #[default]
+    Primary,
+    /// The monitor the mouse pointer is on.
+    Cursor,
+    /// A monitor by number, from 1, in the order the system lists them.
+    /// If it does not exist, the primary monitor is used.
+    Number(u32),
+}
+
+impl Serialize for Monitor {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        match self {
+            Self::Primary => serializer.serialize_str("primary"),
+            Self::Cursor => serializer.serialize_str("cursor"),
+            Self::Number(n) => serializer.serialize_u32(*n),
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for Monitor {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        /// Accepts `"primary"`, `"cursor"` or a number from 1.
+        struct MonitorVisitor;
+
+        impl Visitor<'_> for MonitorVisitor {
+            type Value = Monitor;
+
+            fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                f.write_str(r#""primary", "cursor" or a monitor number from 1"#)
+            }
+
+            fn visit_str<E: de::Error>(self, value: &str) -> Result<Monitor, E> {
+                match value {
+                    "primary" => Ok(Monitor::Primary),
+                    "cursor" => Ok(Monitor::Cursor),
+                    _ => Err(E::invalid_value(de::Unexpected::Str(value), &self)),
+                }
+            }
+
+            fn visit_i64<E: de::Error>(self, value: i64) -> Result<Monitor, E> {
+                // TOML integers arrive as i64.
+                u32::try_from(value)
+                    .ok()
+                    .filter(|&n| n >= 1)
+                    .map(Monitor::Number)
+                    .ok_or_else(|| E::invalid_value(de::Unexpected::Signed(value), &self))
+            }
+
+            fn visit_u64<E: de::Error>(self, value: u64) -> Result<Monitor, E> {
+                self.visit_i64(i64::try_from(value).unwrap_or(-1))
+            }
+        }
+
+        deserializer.deserialize_any(MonitorVisitor)
+    }
+}
+
+/// One of nine points of a monitor's work area: the corners, the middles of
+/// the edges and the center.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum Anchor {
+    /// The top-left corner.
+    TopLeft,
+    /// The middle of the top edge.
+    Top,
+    /// The top-right corner.
+    #[default]
+    TopRight,
+    /// The middle of the left edge.
+    Left,
+    /// The center.
+    Center,
+    /// The middle of the right edge.
+    Right,
+    /// The bottom-left corner.
+    BottomLeft,
+    /// The middle of the bottom edge.
+    Bottom,
+    /// The bottom-right corner.
+    BottomRight,
+}
+
+/// How long the flyout stays and how it fades, in milliseconds.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(default)]
+pub struct TimingConfig {
+    /// From invisible to fully opaque (0 = appear at once).
+    pub fade_in_ms: u64,
+    /// How long the flyout stays fully opaque after the last trigger.
+    pub hold_ms: u64,
+    /// From fully opaque to invisible (0 = vanish at once).
+    pub fade_out_ms: u64,
+}
+
+impl Default for TimingConfig {
+    fn default() -> Self {
+        let timing = Timing::default();
+        Self {
+            fade_in_ms: timing.fade_in.as_millis() as u64,
+            hold_ms: timing.hold.as_millis() as u64,
+            fade_out_ms: timing.fade_out.as_millis() as u64,
+        }
+    }
+}
+
+impl TimingConfig {
+    /// The durations for [`crate::FlyoutTimer`].
+    pub fn timing(&self) -> Timing {
+        Timing {
+            fade_in: Duration::from_millis(self.fade_in_ms),
+            hold: Duration::from_millis(self.hold_ms),
+            fade_out: Duration::from_millis(self.fade_out_ms),
+        }
+    }
+}
+
+/// Settings read from a file, and what was wrong with them but did not stop
+/// them from being used.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Loaded {
+    /// The settings, with every problem below already corrected.
+    pub config: Config,
+    /// Unknown keys and clamped values, one sentence each, for the log.
+    pub warnings: Vec<String>,
+}
+
+/// Why the settings could not be read. The host keeps the settings it has.
+#[derive(Debug)]
+pub enum Error {
+    /// The file could not be read.
+    Io(std::io::Error),
+    /// The file is not valid TOML, or a value has the wrong type or an
+    /// unknown name (the message says where).
+    Parse(toml::de::Error),
+}
+
+impl fmt::Display for Error {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Io(err) => write!(f, "cannot read the settings: {err}"),
+            Self::Parse(err) => write!(f, "invalid settings: {err}"),
+        }
+    }
+}
+
+impl std::error::Error for Error {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Io(err) => Some(err),
+            Self::Parse(err) => Some(err),
+        }
+    }
+}
+
+impl Config {
+    /// Reads settings from the text of a TOML file.
+    pub fn parse(text: &str) -> Result<Loaded, Error> {
+        let mut warnings = Vec::new();
+        let deserializer = toml::Deserializer::parse(text).map_err(Error::Parse)?;
+        // serde_ignored reports every key that the types above skip.
+        let mut config: Config = serde_ignored::deserialize(deserializer, |path| {
+            warnings.push(format!("unknown setting `{path}` (ignored)"));
+        })
+        .map_err(Error::Parse)?;
+        config.clamp(&mut warnings);
+        Ok(Loaded { config, warnings })
+    }
+
+    /// Reads settings from a file.
+    pub fn load(path: &Path) -> Result<Loaded, Error> {
+        let text = std::fs::read_to_string(path).map_err(Error::Io)?;
+        Self::parse(&text)
+    }
+
+    /// Writes [`DEFAULT_FILE`] to `path`, creating its folder, unless the
+    /// file exists. Returns whether it was written.
+    pub fn write_default_if_missing(path: &Path) -> std::io::Result<bool> {
+        if path.exists() {
+            return Ok(false);
+        }
+        if let Some(dir) = path.parent() {
+            std::fs::create_dir_all(dir)?;
+        }
+        // `create_new` so that a file made in the meantime is never replaced.
+        match std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(path)
+        {
+            Ok(mut file) => {
+                use std::io::Write as _;
+                file.write_all(DEFAULT_FILE.as_bytes())?;
+                Ok(true)
+            }
+            Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => Ok(false),
+            Err(err) => Err(err),
+        }
+    }
+
+    /// Brings every value into its range, with a warning for each change.
+    fn clamp(&mut self, warnings: &mut Vec<String>) {
+        let display = &mut self.display;
+        clamp_f32(
+            "display.scale",
+            &mut display.scale,
+            SCALE_RANGE,
+            Display::default().scale,
+            warnings,
+        );
+        clamp_f32(
+            "display.opacity",
+            &mut display.opacity,
+            (0.0, 1.0),
+            Display::default().opacity,
+            warnings,
+        );
+        let timing = &mut self.timing;
+        for (name, value) in [
+            ("timing.fade_in_ms", &mut timing.fade_in_ms),
+            ("timing.fade_out_ms", &mut timing.fade_out_ms),
+        ] {
+            if *value > MAX_FADE_MS {
+                warnings.push(format!(
+                    "`{name}` = {value} is longer than {MAX_FADE_MS}; using {MAX_FADE_MS}"
+                ));
+                *value = MAX_FADE_MS;
+            }
+        }
+    }
+}
+
+/// Clamps `value` into `(min, max)`; a value that is not a number at all
+/// (NaN, which TOML allows as `nan`) takes `default`.
+fn clamp_f32(
+    name: &str,
+    value: &mut f32,
+    (min, max): (f32, f32),
+    default: f32,
+    warnings: &mut Vec<String>,
+) {
+    let fixed = if value.is_nan() {
+        default
+    } else {
+        value.clamp(min, max)
+    };
+    // Compare the bits so that a NaN, which equals nothing, also counts.
+    if fixed.to_bits() != value.to_bits() {
+        warnings.push(format!(
+            "`{name}` = {value} is outside {min}..={max}; using {fixed}"
+        ));
+        *value = fixed;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_default_file_has_the_default_values() {
+        let loaded = Config::parse(DEFAULT_FILE).unwrap();
+        assert_eq!(loaded.config, Config::default());
+        assert!(loaded.warnings.is_empty(), "{:?}", loaded.warnings);
+    }
+
+    #[test]
+    fn every_key_of_the_default_config_is_in_the_default_file() {
+        // The default file is written by hand; serializing the defaults
+        // and parsing the file must give the same set of keys, so that no
+        // setting goes undocumented.
+        let keys = |value: toml::Value| -> Vec<String> {
+            let mut keys = Vec::new();
+            for (section, table) in value.as_table().unwrap() {
+                for key in table.as_table().unwrap().keys() {
+                    keys.push(format!("{section}.{key}"));
+                }
+            }
+            keys.sort();
+            keys
+        };
+        let documented: toml::Value = toml::from_str(DEFAULT_FILE).unwrap();
+        let defaults = toml::Value::try_from(Config::default()).unwrap();
+        assert_eq!(keys(documented), keys(defaults));
+    }
+
+    #[test]
+    fn missing_keys_take_their_defaults() {
+        let loaded = Config::parse("[display]\nanchor = \"bottom-left\"\n").unwrap();
+        let expected = Config {
+            display: Display {
+                anchor: Anchor::BottomLeft,
+                ..Display::default()
+            },
+            ..Config::default()
+        };
+        assert_eq!(loaded.config, expected);
+        assert!(loaded.warnings.is_empty());
+        assert_eq!(Config::parse("").unwrap().config, Config::default());
+    }
+
+    #[test]
+    fn unknown_keys_are_reported_but_not_fatal() {
+        let loaded = Config::parse(
+            "[display]\nopactiy = 0.5\n[sound]\nbeep = true\n[timing]\nhold_ms = 5000\n",
+        )
+        .unwrap();
+        assert_eq!(loaded.config.timing.hold_ms, 5000);
+        assert_eq!(loaded.config.display.opacity, Display::default().opacity);
+        assert_eq!(
+            loaded.warnings,
+            [
+                "unknown setting `display.opactiy` (ignored)",
+                "unknown setting `sound` (ignored)",
+            ]
+        );
+    }
+
+    #[test]
+    fn monitors_by_name_and_by_number() {
+        let monitor = |value: &str| {
+            Config::parse(&format!("[display]\nmonitor = {value}\n"))
+                .map(|loaded| loaded.config.display.monitor)
+        };
+        assert_eq!(monitor(r#""primary""#).unwrap(), Monitor::Primary);
+        assert_eq!(monitor(r#""cursor""#).unwrap(), Monitor::Cursor);
+        assert_eq!(monitor("2").unwrap(), Monitor::Number(2));
+        // Numbers start at 1, as people count monitors.
+        assert!(monitor("0").is_err());
+        assert!(monitor("-1").is_err());
+        assert!(monitor(r#""second""#).is_err());
+        assert!(monitor("1.5").is_err());
+    }
+
+    #[test]
+    fn wrong_values_are_errors_that_say_where() {
+        let err = Config::parse("[display]\nanchor = \"top-middle\"\n").unwrap_err();
+        let message = err.to_string();
+        assert!(message.contains("top-middle"), "{message}");
+        assert!(message.contains("line 2"), "{message}");
+        assert!(Config::parse("[timing]\nhold_ms = \"long\"\n").is_err());
+        assert!(Config::parse("[display\n").is_err());
+    }
+
+    #[test]
+    fn out_of_range_values_are_clamped() {
+        let loaded =
+            Config::parse("[display]\nscale = 10.0\nopacity = nan\n[timing]\nfade_in_ms = 60000\n")
+                .unwrap();
+        let config = loaded.config;
+        assert_eq!(config.display.scale, SCALE_RANGE.1);
+        assert_eq!(config.display.opacity, Display::default().opacity);
+        assert_eq!(config.timing.fade_in_ms, MAX_FADE_MS);
+        assert_eq!(loaded.warnings.len(), 3, "{:?}", loaded.warnings);
+        // A value inside its range is left alone.
+        let loaded = Config::parse("[display]\nopacity = 0.0\n").unwrap();
+        assert_eq!(loaded.config.display.opacity, 0.0);
+        assert!(loaded.warnings.is_empty());
+    }
+
+    #[test]
+    fn language_auto_means_the_system() {
+        let lang = |language: &str| {
+            General {
+                language: language.to_owned(),
+                ..General::default()
+            }
+            .language()
+            .map(str::to_owned)
+        };
+        assert_eq!(lang("auto"), None);
+        assert_eq!(lang("Auto"), None);
+        assert_eq!(lang(""), None);
+        assert_eq!(lang(" ja "), Some("ja".to_owned()));
+    }
+
+    #[test]
+    fn the_default_file_is_written_once() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("new folder").join("config.toml");
+        assert!(Config::write_default_if_missing(&path).unwrap());
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), DEFAULT_FILE);
+        // The user's own file is never replaced.
+        std::fs::write(&path, "[timing]\nhold_ms = 1000\n").unwrap();
+        assert!(!Config::write_default_if_missing(&path).unwrap());
+        assert_eq!(Config::load(&path).unwrap().config.timing.hold_ms, 1000);
+    }
+}

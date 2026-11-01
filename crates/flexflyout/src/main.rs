@@ -12,6 +12,7 @@
 
 mod console;
 mod i18n;
+mod settings;
 
 #[cfg(windows)]
 mod app;
@@ -43,9 +44,15 @@ struct Cli {
     #[arg(long, value_name = "N", default_value_t = 5, requires = "demo")]
     cycles: u32,
 
-    /// Language of the texts, such as "en" or "ja" (default: the system's).
+    /// Language of the texts, such as "en" or "ja" (default: the one in
+    /// the settings, else the system's).
     #[arg(long, value_name = "LANG")]
     lang: Option<String>,
+
+    /// Settings file, written with the defaults if it does not exist
+    /// (default: %APPDATA%\flexflyout\config.toml on Windows).
+    #[arg(long, value_name = "PATH")]
+    config: Option<PathBuf>,
 
     /// Where to write the log
     /// (default: %LOCALAPPDATA%\flexflyout\flexflyout.log on Windows).
@@ -81,7 +88,9 @@ fn run(cli: Cli) -> anyhow::Result<()> {
         env!("CARGO_PKG_VERSION")
     );
 
-    let loader = i18n::load(cli.lang.as_deref())?;
+    let config_file = cli.config.clone().unwrap_or_else(settings::default_file);
+    let config = settings::load_at_start(&config_file);
+    let loader = i18n::load(settings::language(cli.lang.as_deref(), &config).as_deref())?;
     let labels = i18n::labels(&loader);
 
     #[cfg(windows)]
@@ -91,7 +100,10 @@ fn run(cli: Cli) -> anyhow::Result<()> {
         }
         app::run(
             labels,
+            config,
             app::Options {
+                config_file,
+                lang: cli.lang,
                 demo_cycles: cli.cycles,
                 show_via_egui: cli.show_via_egui,
             },
@@ -99,7 +111,7 @@ fn run(cli: Cli) -> anyhow::Result<()> {
     }
     #[cfg(not(windows))]
     {
-        let _ = labels;
+        let _ = (labels, config_file);
         anyhow::bail!("FlexFlyout runs only on Windows for now")
     }
 }

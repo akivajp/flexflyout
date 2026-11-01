@@ -1,0 +1,46 @@
+# FlexFlyout settings.
+#
+# Changes take effect within a second of saving this file. Every key is
+# optional: delete one to get its default back, or delete the whole file to
+# get this commented version again on the next start.
+
+[general]
+# Language of the texts: "auto" (the system's), "en" or "ja".
+language = "auto"
+
+# What to do with the Windows volume indicator:
+#   "avoid" - leave it, and place the flyout so that the two do not overlap
+#   "hide"  - hide it
+#   "keep"  - leave it and ignore it (the two may overlap)
+native_osd = "avoid"
+
+[display]
+# Monitor to show the flyout on: "primary", "cursor" (the one the mouse
+# pointer is on) or a number from 1. A missing number means the primary one.
+monitor = "primary"
+
+# Where on the monitor (the area without the taskbar):
+#   "top-left"     "top"     "top-right"
+#   "left"         "center"  "right"
+#   "bottom-left"  "bottom"  "bottom-right"
+anchor = "top-right"
+
+# Distance from that point in pixels. Next to an edge it is measured inwards
+# from the edge; along a centered axis, positive moves right or down.
+offset_x = 24
+offset_y = 24
+
+# Size relative to the normal size, from 0.25 to 4.0 (on top of the Windows
+# display scaling).
+scale = 1.0
+
+# Opacity of the panel's background, from 0.0 (invisible) to 1.0. The text
+# and the buttons stay opaque.
+opacity = 0.92
+
+[timing]
+# In milliseconds. The flyout fades in, stays for `hold_ms` after the last
+# volume change or track change, then fades out. 0 fades at once.
+fade_in_ms = 150
+hold_ms = 3000
+fade_out_ms = 400

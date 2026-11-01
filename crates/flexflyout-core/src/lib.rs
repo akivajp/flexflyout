@@ -4,8 +4,10 @@
 //! (Windows with eframe now, KDE and GNOME later) shares the same model and
 //! the same timing rules, and so that they can be tested anywhere.
 
+pub mod config;
 mod timer;
 
+pub use config::Config;
 pub use timer::{FlyoutTimer, Timing};
 
 /// Playback state reported by the media player.

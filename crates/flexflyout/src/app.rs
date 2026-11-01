@@ -1,24 +1,23 @@
 //! The Windows host: an eframe window that draws the flyout and shows and
 //! hides itself following [`FlyoutTimer`].
 //!
-//! Sources (for now only the demo) run on their own threads. They send a
-//! [`Message`], show the window through Win32 at once and ask egui for a
-//! repaint; the app then picks the message up in [`eframe::App::logic`].
+//! Sources (for now the demo and the settings file) run on their own
+//! threads. They send a [`Message`], show the window through Win32 at once
+//! when there is something to show, and ask egui for a repaint; the app then
+//! picks the message up in [`eframe::App::logic`].
 
+use std::path::PathBuf;
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::time::Instant;
 
 use eframe::egui;
-use flexflyout_core::{FlyoutTimer, NowPlaying, Timing, Volume};
+use flexflyout_core::{Config, FlyoutTimer, NowPlaying, Volume};
 use flexflyout_ui::{BASE_SIZE, FlyoutView, Labels};
 
 use crate::platform::windows::window::{self, FlyoutWindow};
 
 /// Distance of the window from the corner of the screen, in pixels.
 const MARGIN: i32 = 24;
-
-/// Background opacity of the panel (a setting later).
-const BACKGROUND_OPACITY: f32 = 0.92;
 
 /// What the sources send to the window.
 #[derive(Debug)]
@@ -32,13 +31,25 @@ pub enum Message {
         /// When the message was sent, to log how long showing took.
         sent: Instant,
     },
+    /// Use new settings (the file was saved).
+    Settings {
+        /// The settings read from the file.
+        config: Box<Config>,
+        /// The texts again, when the language changed.
+        labels: Option<Labels>,
+    },
     /// Close the app (the end of the demo).
     Quit,
 }
 
 /// Options of the Windows host.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 pub struct Options {
+    /// The settings file to watch for changes.
+    pub config_file: PathBuf,
+    /// The language given on the command line, which overrides the one in
+    /// the settings.
+    pub lang: Option<String>,
     /// Number of demo appearances (0 = endless).
     pub demo_cycles: u32,
     /// Show the window with egui's viewport command instead of Win32.
@@ -46,7 +57,7 @@ pub struct Options {
 }
 
 /// Opens the flyout window and runs until it is closed.
-pub fn run(labels: Labels, options: Options) -> anyhow::Result<()> {
+pub fn run(labels: Labels, config: Config, options: Options) -> anyhow::Result<()> {
     // Present through DirectComposition: the default presentation of DirectX
     // 12 cannot show a transparent window. wgpu reads this when it starts.
     // SAFETY: no other thread exists yet (logging and i18n start none).
@@ -68,7 +79,7 @@ pub fn run(labels: Labels, options: Options) -> anyhow::Result<()> {
         "FlexFlyout",
         native_options,
         Box::new(move |cc| {
-            let app = FlyoutApp::new(cc, labels, options)?;
+            let app = FlyoutApp::new(cc, labels, config, options)?;
             Ok(Box::new(app))
         }),
     )
@@ -78,6 +89,7 @@ pub fn run(labels: Labels, options: Options) -> anyhow::Result<()> {
 /// State of the flyout window.
 struct FlyoutApp {
     labels: Labels,
+    config: Config,
     now_playing: Option<NowPlaying>,
     volume: Option<Volume>,
     timer: FlyoutTimer,
@@ -97,6 +109,7 @@ impl FlyoutApp {
     fn new(
         cc: &eframe::CreationContext<'_>,
         labels: Labels,
+        config: Config,
         options: Options,
     ) -> anyhow::Result<Self> {
         // egui asks winit for a drop shadow on undecorated windows, which
@@ -117,14 +130,17 @@ impl FlyoutApp {
         let (sender, messages) = channel();
         let ctx = cc.egui_ctx.clone();
         let raw = window.raw();
-        let send = move |message: Message| send(&sender, &ctx, raw, message, options.show_via_egui);
+        let show_via_egui = options.show_via_egui;
+        let send = move |message: Message| send(&sender, &ctx, raw, message, show_via_egui);
+        watch_settings(&options, &config, send.clone());
         crate::demo::spawn(options.demo_cycles, send);
 
         Ok(Self {
             labels,
+            timer: FlyoutTimer::new(config.timing.timing()),
+            config,
             now_playing: None,
             volume: None,
-            timer: FlyoutTimer::new(Timing::default()),
             messages,
             window,
             show_via_egui: options.show_via_egui,
@@ -132,6 +148,35 @@ impl FlyoutApp {
             cleared: false,
         })
     }
+}
+
+/// Sends the settings to the window every time the file is saved, with the
+/// texts in the new language when that changed.
+fn watch_settings(options: &Options, config: &Config, send: impl Fn(Message) + Send + 'static) {
+    let lang = options.lang.clone();
+    let mut language = crate::settings::language(lang.as_deref(), config);
+    crate::settings::watch(options.config_file.clone(), move |config| {
+        let new_language = crate::settings::language(lang.as_deref(), &config);
+        let labels = if new_language != language {
+            // A bad language code keeps the texts in use.
+            match crate::i18n::load(new_language.as_deref()) {
+                Ok(loader) => Some(crate::i18n::labels(&loader)),
+                Err(err) => {
+                    log::error!("{err:#}");
+                    None
+                }
+            }
+        } else {
+            None
+        };
+        if labels.is_some() {
+            language = new_language;
+        }
+        send(Message::Settings {
+            config: Box::new(config),
+            labels,
+        });
+    });
 }
 
 /// Hands a message to the window from a source's thread.
@@ -177,6 +222,13 @@ impl eframe::App for FlyoutApp {
                     self.cleared = false;
                     if self.show_via_egui {
                         ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
+                    }
+                }
+                Message::Settings { config, labels } => {
+                    self.timer.set_timing(config.timing.timing());
+                    self.config = *config;
+                    if let Some(labels) = labels {
+                        self.labels = labels;
                     }
                 }
                 Message::Quit => {
@@ -225,7 +277,7 @@ impl eframe::App for FlyoutApp {
         let view = FlyoutView {
             now_playing: self.now_playing.as_ref(),
             volume: self.volume,
-            background_opacity: BACKGROUND_OPACITY,
+            background_opacity: self.config.display.opacity,
             labels: &self.labels,
         };
         if let Some(command) = flexflyout_ui::draw(ui, &view) {
