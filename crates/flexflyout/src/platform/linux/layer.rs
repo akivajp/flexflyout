@@ -23,6 +23,9 @@ use smithay_client_toolkit::compositor::{CompositorHandler, CompositorState};
 use smithay_client_toolkit::output::{OutputHandler, OutputState};
 use smithay_client_toolkit::registry::{ProvidesRegistryState, RegistryState};
 use smithay_client_toolkit::seat::pointer::{PointerEvent, PointerEventKind, PointerHandler};
+use smithay_client_toolkit::seat::relative_pointer::{
+    RelativeMotionEvent, RelativePointerHandler, RelativePointerState,
+};
 use smithay_client_toolkit::seat::{Capability, SeatHandler, SeatState};
 use smithay_client_toolkit::shell::WaylandSurface;
 use smithay_client_toolkit::shell::wlr_layer::{
@@ -86,6 +89,49 @@ pub fn placement(display: &Display, size: (u32, u32), slide: (i32, i32)) -> Plac
     }
 }
 
+/// `placement` moved by `(dx, dy)` logical pixels (where the user dragged
+/// it): the margin on an anchored edge grows or shrinks, and a centered
+/// axis shifts as [`placement`] shifts it.
+pub fn moved(placement: Placement, (dx, dy): (i32, i32)) -> Placement {
+    use wlr_layer::Anchor as A;
+    let (mut top, mut right, mut bottom, mut left) = placement.margins;
+    // One axis: its margins at the start and the end, moved by `d`.
+    let axis = |start: &mut i32, end: &mut i32, d: i32, start_edge: A, end_edge: A| {
+        let anchor = placement.anchor;
+        match (anchor.contains(start_edge), anchor.contains(end_edge)) {
+            (true, true) => {
+                let shift = (*start - *end) / 2 + d;
+                *start = (2 * shift).max(0);
+                *end = (-2 * shift).max(0);
+            }
+            (true, false) => *start += d,
+            (false, true) => *end -= d,
+            (false, false) => {}
+        }
+    };
+    axis(&mut left, &mut right, dx, A::LEFT, A::RIGHT);
+    axis(&mut top, &mut bottom, dy, A::TOP, A::BOTTOM);
+    Placement {
+        margins: (top, right, bottom, left),
+        ..placement
+    }
+}
+
+/// The placement settings with the offsets moved by `(dx, dy)` logical
+/// pixels: what puts the flyout where the user dragged it from now on.
+pub fn display_moved(display: &Display, (dx, dy): (i32, i32)) -> Display {
+    let (column, row) = edges(display.anchor);
+    let along = |edge: Edge, offset: i32, d: i32| match edge {
+        Edge::End => offset - d,
+        Edge::Start | Edge::Center => offset + d,
+    };
+    Display {
+        offset_x: along(column, display.offset_x, dx),
+        offset_y: along(row, display.offset_y, dy),
+        ..display.clone()
+    }
+}
+
 /// Where along one axis an anchor lies.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Edge {
@@ -142,7 +188,10 @@ struct Shown {
     /// Dropped before `layer`: the wgpu surface draws into it.
     target: Option<wgpu::Surface<'static>>,
     layer: LayerSurface,
+    /// Where the host wants it.
     placement: Placement,
+    /// Where it is: the host's placement, moved by where it was dragged.
+    applied: Placement,
     /// Whether the compositor has sized it (only then can it be drawn).
     configured: bool,
     /// The output's integer scale (buffer pixels per logical pixel).
@@ -159,6 +208,15 @@ pub struct Wayland {
     compositor: CompositorState,
     layer_shell: LayerShell,
     pointer: Option<wl_pointer::WlPointer>,
+    /// Relative pointer motion, which moves a dragged flyout (positions on
+    /// the surface change as it moves). `None` where the compositor lacks
+    /// it: the flyout cannot be dragged then.
+    relative: Option<(
+        RelativePointerState,
+        Option<wayland_protocols::wp::relative_pointer::zv1::client::zwp_relative_pointer_v1::ZwpRelativePointerV1>,
+    )>,
+    /// The part of a relative motion not moved yet (below a pixel).
+    remainder: (f64, f64),
     instance: wgpu::Instance,
     gpu: Option<Gpu>,
     shown: Option<Shown>,
@@ -168,6 +226,17 @@ pub struct Wayland {
     pointer_inside: bool,
     /// The zoom (the scale setting), to turn logical pixels into points.
     zoom: f32,
+    /// Where the left button went down on the surface (logical pixels),
+    /// while it is down.
+    pressed_at: Option<(f64, f64)>,
+    /// Where the pointer was last on the surface (logical pixels).
+    pointer_at: (f64, f64),
+    /// Whether the user drags the flyout to move it.
+    dragging: bool,
+    /// How far the user dragged it, until it hides (logical pixels).
+    dragged: (i32, i32),
+    /// A drag that ended since the host last asked.
+    move_ended: Option<(i32, i32)>,
     started: Instant,
 }
 
@@ -190,6 +259,7 @@ impl Wayland {
         let instance = wgpu::Instance::new(
             wgpu::InstanceDescriptor::new_with_display_handle_from_env(Box::new(display)),
         );
+        let relative = RelativePointerState::bind(globals, &queue);
         Ok(Self {
             registry: RegistryState::new(globals),
             outputs: OutputState::new(globals, &queue),
@@ -199,12 +269,19 @@ impl Wayland {
             compositor,
             layer_shell,
             pointer: None,
+            relative: Some((relative, None)),
+            remainder: (0.0, 0.0),
             instance,
             gpu: None,
             shown: None,
             events: Vec::new(),
             pointer_inside: false,
             zoom: 1.0,
+            pressed_at: None,
+            pointer_at: (0.0, 0.0),
+            dragging: false,
+            dragged: (0, 0),
+            move_ended: None,
             started: Instant::now(),
         })
     }
@@ -230,14 +307,16 @@ impl Wayland {
     /// Shows the flyout at `placement`, or moves it there if it is shown.
     pub fn show(&mut self, placement: Placement, zoom: f32) {
         self.zoom = zoom;
+        let applied = moved(placement, self.dragged);
         if let Some(shown) = &mut self.shown {
             // An output change needs a new surface (a layer surface's
             // output is fixed).
             if shown.placement.output == placement.output {
-                if shown.placement != placement {
-                    apply(&shown.layer, &placement);
+                shown.placement = placement;
+                if shown.applied != applied {
+                    apply(&shown.layer, &applied);
                     shown.layer.commit();
-                    shown.placement = placement;
+                    shown.applied = applied;
                 }
                 return;
             }
@@ -253,7 +332,7 @@ impl Wayland {
             output.as_ref(),
         );
         layer.set_keyboard_interactivity(KeyboardInteractivity::None);
-        apply(&layer, &placement);
+        apply(&layer, &applied);
         // The first commit carries no buffer; the compositor answers with
         // a configure, after which the surface can be drawn.
         layer.commit();
@@ -261,19 +340,75 @@ impl Wayland {
             target: None,
             layer,
             placement,
+            applied,
             configured: false,
             scale: 1,
         });
     }
 
-    /// Hides the flyout (destroys its surface).
+    /// Hides the flyout (destroys its surface). A place it was dragged to
+    /// lasts one appearance.
     pub fn hide(&mut self) {
         if let Some(mut shown) = self.shown.take() {
             shown.target = None;
             drop(shown);
             self.pointer_inside = false;
+            self.pressed_at = None;
+            self.dragging = false;
+            self.dragged = (0, 0);
             let _ = self.connection.flush();
         }
+    }
+
+    /// Lets the user move the flyout with the left button that is down on
+    /// it (the panel's background was grabbed).
+    pub fn start_move(&mut self) {
+        let relative = self.relative.as_ref().is_some_and(|(_, r)| r.is_some());
+        let Some(pressed) = self.pressed_at.filter(|_| relative) else {
+            return;
+        };
+        self.dragging = true;
+        // egui calls it a drag only after the pointer moved a little: move
+        // by that much at once, so that the grabbed spot stays under it.
+        self.remainder = (self.pointer_at.0 - pressed.0, self.pointer_at.1 - pressed.1);
+        self.move_by(0.0, 0.0);
+    }
+
+    /// Moves a dragged flyout by a relative motion (logical pixels); whole
+    /// pixels at a time, with the rest kept for the next motion.
+    fn move_by(&mut self, dx: f64, dy: f64) {
+        let x = self.remainder.0 + dx;
+        let y = self.remainder.1 + dy;
+        let (dx, dy) = (x.trunc() as i32, y.trunc() as i32);
+        self.remainder = (x.fract(), y.fract());
+        if (dx, dy) == (0, 0) {
+            return;
+        }
+        self.dragged = (self.dragged.0 + dx, self.dragged.1 + dy);
+        if let Some(shown) = &mut self.shown {
+            shown.applied = moved(shown.placement, self.dragged);
+            apply(&shown.layer, &shown.applied);
+            shown.layer.commit();
+        }
+    }
+
+    /// Sends the requests made so far. Called after each dispatch, so that
+    /// a move answered from an event callback (which must not flush itself:
+    /// the dispatch holds the connection) reaches the compositor before
+    /// the event loop sleeps.
+    pub fn flush(&self) {
+        let _ = self.connection.flush();
+    }
+
+    /// Forgets where the flyout was dragged (the placement settings now
+    /// put it there, or elsewhere).
+    pub fn forget_drag(&mut self) {
+        self.dragged = (0, 0);
+    }
+
+    /// How far the user dragged the flyout, once per drag that ended.
+    pub fn take_move_ended(&mut self) -> Option<(i32, i32)> {
+        self.move_ended.take()
     }
 
     /// Draws a frame with `ui` (on top of a transparent background) if the
@@ -462,6 +597,14 @@ fn configure_target(shown: &Shown, gpu: &Gpu) {
     .into_iter()
     .find(|mode| capabilities.alpha_modes.contains(mode))
     .unwrap_or(wgpu::CompositeAlphaMode::Auto);
+    // Never wait for the compositor's frame callback (FIFO does): it may
+    // not come for a while (the surface moving, an occluded output), and
+    // waiting would stall the whole event loop. The flyout draws only
+    // when something changed anyway.
+    let present_mode = [wgpu::PresentMode::Mailbox, wgpu::PresentMode::Immediate]
+        .into_iter()
+        .find(|mode| capabilities.present_modes.contains(mode))
+        .unwrap_or(wgpu::PresentMode::Fifo);
     shown.layer.wl_surface().set_buffer_scale(shown.scale);
     target.configure(
         &gpu.device,
@@ -470,7 +613,7 @@ fn configure_target(shown: &Shown, gpu: &Gpu) {
             format: gpu.format,
             width: shown.placement.width * shown.scale as u32,
             height: shown.placement.height * shown.scale as u32,
-            present_mode: wgpu::PresentMode::Fifo,
+            present_mode,
             desired_maximum_frame_latency: 2,
             alpha_mode,
             view_formats: vec![],
@@ -501,6 +644,15 @@ impl LayerShellHandler for Wayland {
         if width > 0 && height > 0 {
             shown.placement.width = width;
             shown.placement.height = height;
+        }
+        // A change of the margins (a slide, a drag) is applied by the
+        // compositor once the configure it answers with is acknowledged
+        // (sctk does that) and the surface is committed again: commit now
+        // rather than at the next frame, which may be a while away.
+        // (Sent by `flush` right after this dispatch: flushing from inside
+        // it would deadlock.)
+        if shown.configured {
+            shown.layer.commit();
         }
         shown.configured = true;
         if let Some(gpu) = &self.gpu {
@@ -588,7 +740,17 @@ impl SeatHandler for Wayland {
     ) {
         if capability == Capability::Pointer && self.pointer.is_none() {
             match self.seats.get_pointer(queue, &seat) {
-                Ok(pointer) => self.pointer = Some(pointer),
+                Ok(pointer) => {
+                    if let Some((state, relative)) = &mut self.relative {
+                        match state.get_relative_pointer(&pointer, queue) {
+                            Ok(new) => *relative = Some(new),
+                            Err(err) => {
+                                log::info!("no relative pointer motion (no dragging): {err}")
+                            }
+                        }
+                    }
+                    self.pointer = Some(pointer);
+                }
                 Err(err) => log::warn!("no mouse pointer: {err}"),
             }
         }
@@ -619,11 +781,11 @@ impl PointerHandler for Wayland {
         _: &wl_pointer::WlPointer,
         events: &[PointerEvent],
     ) {
-        let Some(shown) = &self.shown else {
+        let Some(surface) = self.shown.as_ref().map(|s| s.layer.wl_surface().clone()) else {
             return;
         };
         for event in events {
-            if &event.surface != shown.layer.wl_surface() {
+            if event.surface != surface {
                 continue;
             }
             // Logical pixels to egui points.
@@ -641,10 +803,23 @@ impl PointerHandler for Wayland {
                     self.events.push(egui::Event::PointerGone);
                 }
                 PointerEventKind::Motion { .. } => {
-                    self.events.push(egui::Event::PointerMoved(pos));
+                    self.pointer_at = event.position;
+                    // While dragging, the relative motion moves the surface,
+                    // and egui must not see the pointer move on it.
+                    if !self.dragging {
+                        self.events.push(egui::Event::PointerMoved(pos));
+                    }
                 }
                 PointerEventKind::Press { button, .. }
                 | PointerEventKind::Release { button, .. } => {
+                    let pressed = matches!(event.kind, PointerEventKind::Press { .. });
+                    if button == BTN_LEFT {
+                        self.pressed_at = pressed.then_some(event.position);
+                        if !pressed && self.dragging {
+                            self.dragging = false;
+                            self.move_ended = Some(self.dragged);
+                        }
+                    }
                     let button = match button {
                         BTN_LEFT => egui::PointerButton::Primary,
                         BTN_RIGHT => egui::PointerButton::Secondary,
@@ -654,12 +829,27 @@ impl PointerHandler for Wayland {
                     self.events.push(egui::Event::PointerButton {
                         pos,
                         button,
-                        pressed: matches!(event.kind, PointerEventKind::Press { .. }),
+                        pressed,
                         modifiers: egui::Modifiers::NONE,
                     });
                 }
                 PointerEventKind::Axis { .. } => {}
             }
+        }
+    }
+}
+
+impl RelativePointerHandler for Wayland {
+    fn relative_pointer_motion(
+        &mut self,
+        _: &Connection,
+        _: &QueueHandle<Self>,
+        _: &wayland_protocols::wp::relative_pointer::zv1::client::zwp_relative_pointer_v1::ZwpRelativePointerV1,
+        _: &wl_pointer::WlPointer,
+        event: RelativeMotionEvent,
+    ) {
+        if self.dragging {
+            self.move_by(event.delta.0, event.delta.1);
         }
     }
 }
@@ -778,6 +968,23 @@ mod tests {
             ..display(Anchor::Bottom)
         };
         assert_eq!(placement(&left, (400, 164), (0, 0)).margins, (0, 20, 16, 0));
+    }
+
+    #[test]
+    fn dragging_moves_the_margins_and_the_offsets() {
+        // Top right, dragged 30 left and 10 down.
+        let top_right = display(Anchor::TopRight);
+        let p = moved(placement(&top_right, (400, 164), (0, 0)), (-30, 10));
+        assert_eq!(p.margins, (26, 54, 0, 0));
+        let again = display_moved(&top_right, (-30, 10));
+        assert_eq!((again.offset_x, again.offset_y), (54, 26));
+        assert_eq!(placement(&again, (400, 164), (0, 0)).margins, p.margins);
+        // Bottom center, dragged 40 left: past the middle to the other side.
+        let bottom = display(Anchor::Bottom);
+        let p = moved(placement(&bottom, (400, 164), (0, 0)), (-40, 0));
+        assert_eq!(p.margins, (0, 32, 16, 0));
+        let again = display_moved(&bottom, (-40, 0));
+        assert_eq!(placement(&again, (400, 164), (0, 0)).margins, p.margins);
     }
 
     #[test]

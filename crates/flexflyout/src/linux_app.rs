@@ -60,6 +60,8 @@ struct Host {
     exit: bool,
     /// Why and when the flyout was last asked to show, until it is drawn.
     pending: Option<(crate::message::Trigger, Instant)>,
+    /// The settings file, where a dragged place is remembered.
+    config_file: PathBuf,
 }
 
 /// Runs the flyout until it is asked to quit.
@@ -132,6 +134,7 @@ pub fn run(
         controls,
         exit: false,
         pending: None,
+        config_file: options.config_file.clone(),
     };
     log::info!("outputs: {:?}", host.wayland.output_names());
     while !host.exit {
@@ -139,6 +142,7 @@ pub fn run(
         event_loop
             .dispatch(timeout, &mut host)
             .context("the event loop failed")?;
+        host.wayland.flush();
     }
     host.wayland.hide();
     Ok(())
@@ -151,6 +155,9 @@ impl Host {
             Received::Content => {}
             Received::Settings(old) => {
                 log::debug!("settings changed from {old:?}");
+                // A remembered drag comes back as new settings, which
+                // place the flyout there now.
+                self.wayland.forget_drag();
             }
             Received::Shown { trigger, sent } => self.pending = Some((trigger, sent)),
             Received::Quit => {
@@ -233,6 +240,9 @@ impl Host {
         if let Some(command) = clicked {
             self.carry_out(command, now);
         }
+        if let Some(dragged) = self.wayland.take_move_ended() {
+            self.finish_move(dragged);
+        }
         Some(output)
     }
 
@@ -243,11 +253,33 @@ impl Host {
             return;
         };
         match (command, &self.controls) {
-            (Command::StartMove, _) => log::info!("moving the flyout is not there yet on Linux"),
+            (Command::StartMove, _) => self.wayland.start_move(),
             (Command::SetVolume(level), Some(controls)) => controls.volume.set_level(level),
             (Command::ToggleMute, Some(controls)) => controls.volume.toggle_mute(),
             (_, Some(controls)) => controls.media.command(command),
             (_, None) => {}
+        }
+    }
+}
+
+impl Host {
+    /// The user dropped the flyout `dragged` logical pixels away: it stays
+    /// there for this appearance, and from then on if the settings say so.
+    fn finish_move(&mut self, dragged: (i32, i32)) {
+        log::info!("moved by {dragged:?}");
+        let config = &self.state.config;
+        if !config.display.remember_drag || dragged == (0, 0) {
+            return;
+        }
+        let new = Config {
+            display: layer::display_moved(&config.display, dragged),
+            ..config.clone()
+        };
+        // The settings file is watched: the new place comes back as new
+        // settings, like a change made in the settings window.
+        match new.save(&self.config_file, config) {
+            Ok(()) => log::info!("remembered the place: {:?}", new.display),
+            Err(err) => log::error!("cannot remember the place: {err}"),
         }
     }
 }
