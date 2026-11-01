@@ -5,6 +5,10 @@
 //! or a key from a newer version) are not an error but are reported, so that
 //! the host can log them. Values out of their range are clamped, also with a
 //! warning, so a bad number never stops the flyout.
+//!
+//! Settings changed in a window are written back with [`update_text`] and
+//! [`Config::save`], which change only those values and keep the user's
+//! comments and layout.
 
 use std::fmt;
 use std::path::Path;
@@ -257,6 +261,8 @@ pub enum Error {
     /// The file is not valid TOML, or a value has the wrong type or an
     /// unknown name (the message says where).
     Parse(toml::de::Error),
+    /// The file could not be written.
+    Write(std::io::Error),
 }
 
 impl fmt::Display for Error {
@@ -264,6 +270,7 @@ impl fmt::Display for Error {
         match self {
             Self::Io(err) => write!(f, "cannot read the settings: {err}"),
             Self::Parse(err) => write!(f, "invalid settings: {err}"),
+            Self::Write(err) => write!(f, "cannot write the settings: {err}"),
         }
     }
 }
@@ -271,7 +278,7 @@ impl fmt::Display for Error {
 impl std::error::Error for Error {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
-            Self::Io(err) => Some(err),
+            Self::Io(err) | Self::Write(err) => Some(err),
             Self::Parse(err) => Some(err),
         }
     }
@@ -322,6 +329,26 @@ impl Config {
         }
     }
 
+    /// Writes the values that differ between `before` and `self` into the
+    /// file at `path` (see [`update_text`]), or into a new file with the
+    /// commented defaults if there is none. The file is replaced in one
+    /// step, so that a reader never sees half of it.
+    pub fn save(&self, path: &Path, before: &Config) -> Result<(), Error> {
+        let text = match std::fs::read_to_string(path) {
+            Ok(text) => text,
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => DEFAULT_FILE.to_owned(),
+            Err(err) => return Err(Error::Io(err)),
+        };
+        let text = update_text(&text, before, self)?;
+        if let Some(dir) = path.parent() {
+            std::fs::create_dir_all(dir).map_err(Error::Write)?;
+        }
+        let mut temporary = path.as_os_str().to_owned();
+        temporary.push(".tmp");
+        std::fs::write(&temporary, text).map_err(Error::Write)?;
+        std::fs::rename(&temporary, path).map_err(Error::Write)
+    }
+
     /// Brings every value into its range, with a warning for each change.
     fn clamp(&mut self, warnings: &mut Vec<String>) {
         let display = &mut self.display;
@@ -351,6 +378,76 @@ impl Config {
                 *value = MAX_FADE_MS;
             }
         }
+    }
+}
+
+/// Writes the values that differ between `before` and `after` into `text`
+/// (the contents of a settings file) and returns the new text.
+///
+/// Only those values change: comments, the order of the keys and every
+/// other value (also ones edited elsewhere since `before` was read) stay as
+/// they are. A key missing from the text is added to its section.
+pub fn update_text(text: &str, before: &Config, after: &Config) -> Result<String, Error> {
+    let mut document: toml_edit::DocumentMut =
+        text.parse().map_err(|err: toml_edit::TomlError| {
+            // Report it the way reading the file would.
+            match toml::from_str::<toml::Table>(text) {
+                Err(parse) => Error::Parse(parse),
+                Ok(_) => Error::Write(std::io::Error::other(err.to_string())),
+            }
+        })?;
+    let tables = |config: &Config| -> toml::Table {
+        // Plain data: serializing it cannot fail.
+        toml::Table::try_from(config).unwrap_or_default()
+    };
+    let (before, after) = (tables(before), tables(after));
+    for (section, keys) in &after {
+        let Some(keys) = keys.as_table() else {
+            continue;
+        };
+        for (key, value) in keys {
+            let old = before.get(section).and_then(|keys| keys.get(key));
+            if old == Some(value) {
+                continue;
+            }
+            if !document.contains_table(section) {
+                document[section] = toml_edit::table();
+            }
+            let new = edit_value(value);
+            match document[section]
+                .get_mut(key)
+                .and_then(|item| item.as_value_mut())
+            {
+                // Keep the spaces and the comment around the old value.
+                Some(old) => {
+                    let decor = old.decor().clone();
+                    *old = new;
+                    *old.decor_mut() = decor;
+                }
+                None => document[section][key] = toml_edit::value(new),
+            }
+        }
+    }
+    Ok(document.to_string())
+}
+
+/// A settings value as `toml_edit` writes it. Every number with a fraction
+/// in the settings is an `f32`: written as the shortest decimal that reads
+/// back as the same `f32` (0.92 rather than 0.9200000166893005).
+fn edit_value(value: &toml::Value) -> toml_edit::Value {
+    match value {
+        toml::Value::String(text) => text.as_str().into(),
+        toml::Value::Integer(number) => (*number).into(),
+        toml::Value::Float(number) => {
+            let shortest = (*number as f32).to_string();
+            shortest.parse::<f64>().unwrap_or(*number).into()
+        }
+        toml::Value::Boolean(flag) => (*flag).into(),
+        // Not used by the settings; written as TOML would.
+        other => other
+            .to_string()
+            .parse()
+            .unwrap_or_else(|_| other.to_string().into()),
     }
 }
 
@@ -496,6 +593,56 @@ mod tests {
         assert_eq!(lang("Auto"), None);
         assert_eq!(lang(""), None);
         assert_eq!(lang(" ja "), Some("ja".to_owned()));
+    }
+
+    #[test]
+    fn updating_keeps_the_comments_and_the_other_values() {
+        let text = "# My settings.\n[display]\nscale = 1.0 # bigger later\nanchor = \"top\"\n\n[timing]\nhold_ms = 5000\n";
+        let before = Config::parse(text).unwrap().config;
+        let mut after = before.clone();
+        after.display.scale = 1.25;
+        after.display.opacity = 0.8;
+        after.general.native_osd = NativeOsd::Hide;
+        // Someone changed the hold time in the file meanwhile; the window
+        // did not touch it, so it stays.
+        let edited = text.replace("hold_ms = 5000", "hold_ms = 7000");
+        let updated = update_text(&edited, &before, &after).unwrap();
+        assert!(updated.starts_with("# My settings.\n"), "{updated}");
+        assert!(
+            updated.contains("scale = 1.25 # bigger later\n"),
+            "{updated}"
+        );
+        assert!(updated.contains("opacity = 0.8\n"), "{updated}");
+        assert!(updated.contains("anchor = \"top\"\n"), "{updated}");
+        assert!(updated.contains("hold_ms = 7000"), "{updated}");
+        let config = Config::parse(&updated).unwrap().config;
+        assert_eq!(config.display.scale, 1.25);
+        assert_eq!(config.display.opacity, 0.8);
+        assert_eq!(config.general.native_osd, NativeOsd::Hide);
+        assert_eq!(config.timing.hold_ms, 7000);
+        // Nothing changed, nothing written.
+        assert_eq!(update_text(text, &before, &before).unwrap(), text);
+    }
+
+    #[test]
+    fn saving_writes_the_default_file_with_the_changes() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("flexflyout").join("config.toml");
+        let mut config = Config::default();
+        config.display.monitor = Monitor::Number(2);
+        config.save(&path, &Config::default()).unwrap();
+        let text = std::fs::read_to_string(&path).unwrap();
+        // The commented file, with the one change.
+        assert!(text.starts_with("# FlexFlyout settings."), "{text}");
+        assert!(text.contains("monitor = 2\n"), "{text}");
+        assert_eq!(Config::load(&path).unwrap().config, config);
+        // A broken file is left alone.
+        std::fs::write(&path, "[display\n").unwrap();
+        assert!(matches!(
+            Config::default().save(&path, &config),
+            Err(Error::Parse(_))
+        ));
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "[display\n");
     }
 
     #[test]
