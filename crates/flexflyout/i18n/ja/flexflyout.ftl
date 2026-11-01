@@ -15,4 +15,5 @@ pin = 表示したままにする
 tray-show = Flyout を表示
 tray-open-settings = 設定ファイルを開く
 tray-reload-settings = 設定を読み込み直す
+tray-start-with-windows = Windows の起動時に開始
 tray-quit = 終了

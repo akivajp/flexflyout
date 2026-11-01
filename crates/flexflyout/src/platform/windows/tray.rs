@@ -18,10 +18,11 @@ use windows::Win32::UI::Shell::{
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     AppendMenuW, CreateIcon, CreatePopupMenu, CreateWindowExW, DefWindowProcW, DestroyMenu,
-    DispatchMessageW, GetCursorPos, GetMessageW, HICON, MF_SEPARATOR, MF_STRING, MSG, PostMessageW,
-    RegisterClassW, RegisterWindowMessageW, SW_SHOWNORMAL, SetForegroundWindow, TPM_NONOTIFY,
-    TPM_RETURNCMD, TPM_RIGHTBUTTON, TrackPopupMenu, TranslateMessage, WINDOW_EX_STYLE,
-    WINDOW_STYLE, WM_APP, WM_CONTEXTMENU, WM_LBUTTONUP, WM_NULL, WM_RBUTTONUP, WNDCLASSW,
+    DispatchMessageW, GetCursorPos, GetMessageW, HICON, MF_CHECKED, MF_SEPARATOR, MF_STRING, MSG,
+    PostMessageW, RegisterClassW, RegisterWindowMessageW, SW_SHOWNORMAL, SetForegroundWindow,
+    TPM_NONOTIFY, TPM_RETURNCMD, TPM_RIGHTBUTTON, TrackPopupMenu, TranslateMessage,
+    WINDOW_EX_STYLE, WINDOW_STYLE, WM_APP, WM_CONTEXTMENU, WM_LBUTTONUP, WM_NULL, WM_RBUTTONUP,
+    WNDCLASSW,
 };
 use windows::core::{HSTRING, PCWSTR, w};
 
@@ -36,16 +37,20 @@ pub enum TrayCommand {
     OpenSettings,
     /// Read the settings file again now.
     ReloadSettings,
+    /// Start with Windows, or stop doing so (a check mark in the menu).
+    ToggleAutostart,
     /// End the app.
     Quit,
 }
 
 /// The menu, in order: command ID (0 = a separator) and command.
-const MENU: [(usize, Option<TrayCommand>); 6] = [
+const MENU: [(usize, Option<TrayCommand>); 8] = [
     (1, Some(TrayCommand::Show)),
     (0, None),
     (2, Some(TrayCommand::OpenSettings)),
     (3, Some(TrayCommand::ReloadSettings)),
+    (0, None),
+    (5, Some(TrayCommand::ToggleAutostart)),
     (0, None),
     (4, Some(TrayCommand::Quit)),
 ];
@@ -257,8 +262,11 @@ fn show_menu(hwnd: HWND) {
         TrayCommand::Show => &labels.show,
         TrayCommand::OpenSettings => &labels.open_settings,
         TrayCommand::ReloadSettings => &labels.reload_settings,
+        TrayCommand::ToggleAutostart => &labels.start_with_windows,
         TrayCommand::Quit => &labels.quit,
     };
+    // Read every time: the Task Manager can change it meanwhile.
+    let autostart = super::autostart::is_enabled();
     // SAFETY: a menu built, shown and destroyed here, owned by our window.
     unsafe {
         let Ok(menu) = CreatePopupMenu() else {
@@ -268,7 +276,13 @@ fn show_menu(hwnd: HWND) {
             let _ = match command {
                 Some(command) => {
                     let label = HSTRING::from(text(command).as_str());
-                    AppendMenuW(menu, MF_STRING, id, &label)
+                    let checked = command == TrayCommand::ToggleAutostart && autostart;
+                    let flags = if checked {
+                        MF_STRING | MF_CHECKED
+                    } else {
+                        MF_STRING
+                    };
+                    AppendMenuW(menu, flags, id, &label)
                 }
                 None => AppendMenuW(menu, MF_SEPARATOR, 0, PCWSTR::null()),
             };

@@ -15,4 +15,5 @@ pin = Keep shown
 tray-show = Show the flyout
 tray-open-settings = Open the settings file
 tray-reload-settings = Reload the settings
+tray-start-with-windows = Start with Windows
 tray-quit = Quit

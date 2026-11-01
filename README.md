@@ -2,7 +2,7 @@
 
 [日本語](README.ja.md)
 
-> **Early development.** The Windows version comes first. It already follows the player, the volume and the volume keys, and reads its settings from `%APPDATA%\flexflyout\config.toml`; its tray icon opens the settings and quits. `flexflyout --demo` shows sample tracks instead.
+> **Early development.** The Windows version comes first. It already follows the player, the volume and the volume keys, and reads its settings from `%APPDATA%\flexflyout\config.toml`; its tray icon opens the settings, turns starting with Windows on or off, and quits. `flexflyout --demo` shows sample tracks instead.
 
 A flexible, cross-platform media flyout. When you change the volume or a new track starts, it pops up with what is playing — cover art, title and artist — along with the position in the track, playback controls (including shuffle and repeat) and the volume, then fades away. Click or drag the bars to seek or set the volume, or pin the flyout to keep it on screen.
 

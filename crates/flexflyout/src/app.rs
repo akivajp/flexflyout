@@ -25,7 +25,7 @@ use crate::platform::windows::media::{self, Change, Media};
 use crate::platform::windows::tray::{self, TrayCommand};
 use crate::platform::windows::volume::{self, VolumeControl};
 use crate::platform::windows::window::{self, FlyoutWindow};
-use crate::platform::windows::{monitor, native_osd};
+use crate::platform::windows::{autostart, monitor, native_osd};
 
 /// Distance kept from the Windows volume indicator, in pixels at 100%.
 const NATIVE_OSD_GAP: f32 = 12.0;
@@ -300,6 +300,15 @@ impl FlyoutApp {
             TrayCommand::Show => to_window(Message::show(Trigger::Tray)),
             TrayCommand::OpenSettings => tray::open_in_editor(&config_file),
             TrayCommand::ReloadSettings => reload.now(),
+            TrayCommand::ToggleAutostart => {
+                // Started with Windows, a settings file of one's own must
+                // still be the one read.
+                let custom = config_file != crate::settings::default_file();
+                let enable = !autostart::is_enabled();
+                if let Err(err) = autostart::set(enable, custom.then_some(config_file.as_path())) {
+                    log::error!("{err:#}");
+                }
+            }
             TrayCommand::Quit => to_window(Message::Quit),
         });
         let controls = match options.demo {
