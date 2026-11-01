@@ -1,0 +1,98 @@
+name: Release
+
+# Pushing a tag such as v0.1.0 builds the Windows binary and publishes a
+# GitHub Release with notes from CHANGELOG.md, the zip and its checksum.
+#
+# Running the workflow by hand only builds the zip (uploaded as an
+# artifact), to check the packaging.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: Build (x86_64-pc-windows-msvc)
+    # On Windows, where the resource compiler embeds the icon and the
+    # version information (build.rs).
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Build
+        run: cargo build --release --locked -p flexflyout
+      - name: Package
+        shell: bash
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            version="$GITHUB_REF_NAME"
+          else
+            version="dev-${GITHUB_SHA::7}"
+          fi
+          name="flexflyout-${version}-x86_64-pc-windows-msvc"
+          mkdir -p "dist/$name"
+          cp target/release/flexflyout.exe "dist/$name/"
+          cp README.md README.ja.md CHANGELOG.md LICENSE-MIT LICENSE-APACHE "dist/$name/"
+          cd dist
+          7z a -tzip "$name.zip" "$name" > /dev/null
+          rm -rf "$name"
+          ls -l
+      - uses: actions/upload-artifact@v7
+        with:
+          name: flexflyout-x86_64-pc-windows-msvc
+          path: dist/*
+          retention-days: 30
+
+  release:
+    name: Publish release
+    needs: build
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+      - name: Check that the tag matches the crate version
+        run: |
+          crate_version=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
+          if [[ "v$crate_version" != "$GITHUB_REF_NAME" ]]; then
+            echo "tag $GITHUB_REF_NAME does not match Cargo.toml version $crate_version" >&2
+            exit 1
+          fi
+      - uses: actions/download-artifact@v8
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Checksums
+        run: cd dist && sha256sum * > SHA256SUMS && cat SHA256SUMS
+      - name: Release notes from CHANGELOG.md
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          # The section of this version, without its heading.
+          awk -v v="$version" '
+            /^## \[/ { if (found) exit; if (index($0, "[" v "]")) { found = 1; next } }
+            found { print }
+          ' CHANGELOG.md > notes.md
+          if [[ ! -s notes.md ]]; then
+            echo "CHANGELOG.md has no section for $version" >&2
+            exit 1
+          fi
+          # Download pages must point at the code signing policy (SignPath).
+          printf '\n[Code signing policy](%s/%s#code-signing-policy)\n' \
+            "$GITHUB_SERVER_URL" "$GITHUB_REPOSITORY" >> notes.md
+          cat notes.md
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" dist/* \
+            --title "FlexFlyout $GITHUB_REF_NAME" \
+            --notes-file notes.md \
+            --verify-tag
