@@ -20,11 +20,6 @@ use flexflyout_core::config::{Anchor, Animation, Monitor, NativeOsd, SCALE_RANGE
 use i18n_embed::fluent::FluentLanguageLoader;
 use i18n_embed_fl::fl;
 
-use crate::platform::windows::{autostart, monitor, tray, window};
-use windows::Win32::Foundation::{ERROR_ALREADY_EXISTS, GetLastError};
-use windows::Win32::System::Threading::CreateMutexW;
-use windows::core::w;
-
 /// How long the settings must stay unchanged before they are written (a
 /// drag of a slider would otherwise write the file on every frame).
 const SAVE_DELAY: Duration = Duration::from_millis(300);
@@ -54,7 +49,7 @@ pub fn run(config_file: PathBuf, lang: Option<String>) -> anyhow::Result<()> {
         "FlexFlyout settings",
         options,
         Box::new(move |cc| {
-            crate::app::setup_fonts(&cc.egui_ctx);
+            os::install_fonts(&cc.egui_ctx);
             Ok(Box::new(state))
         }),
     )
@@ -100,8 +95,8 @@ impl SettingsWindow {
             changed_at: Instant::now(),
             stamp: None,
             checked_at: Instant::now(),
-            autostart: autostart::is_enabled(),
-            monitors: monitor::list(),
+            autostart: os::autostart_enabled(),
+            monitors: os::monitors(),
         };
         window.read_file();
         Ok(window)
@@ -189,34 +184,180 @@ fn icon() -> egui::IconData {
         .unwrap_or_default()
 }
 
-/// Where the open settings window's process writes its ID, for a second
-/// one to find it.
-fn pid_file() -> PathBuf {
-    std::env::temp_dir().join("flexflyout-settings.pid")
+/// The label of the autostart check box on this platform.
+fn autostart_label(loader: &FluentLanguageLoader) -> String {
+    if cfg!(windows) {
+        fl!(loader, "settings-start-with-windows")
+    } else {
+        fl!(loader, "settings-start-at-login")
+    }
 }
 
-/// Whether no other settings window is open. If one is, it is brought to
-/// the front. The check holds a named mutex for the life of the process
-/// (Windows releases it when the process ends, even when killed), so a
-/// left-over ID file of an ended process is never trusted.
-fn first_instance() -> bool {
-    // SAFETY: creates or opens a named mutex; the handle is deliberately
-    // kept open until the process ends.
-    let created = unsafe { CreateMutexW(None, false, w!("Local\\FlexFlyoutSettings")) };
-    // SAFETY: reads this thread's last error, set by the call above.
-    let existed = unsafe { GetLastError() } == ERROR_ALREADY_EXISTS;
-    if created.is_err() || !existed {
-        let _ = std::fs::write(pid_file(), std::process::id().to_string());
-        return true;
+/// Opens the settings window (`--settings`, a process of its own), or
+/// brings it to the front if this process opened it already.
+pub fn open(config_file: &std::path::Path, lang: Option<&str>) {
+    static OPEN: std::sync::Mutex<Option<std::process::Child>> = std::sync::Mutex::new(None);
+    let mut open = OPEN
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    if let Some(child) = open.as_mut()
+        && matches!(child.try_wait(), Ok(None))
+    {
+        os::bring_to_front(child.id());
+        return;
     }
-    match std::fs::read_to_string(pid_file()).map(|text| text.trim().parse::<u32>()) {
-        Ok(Ok(pid)) => {
-            log::info!("the settings window is open already (process {pid})");
-            window::bring_process_to_front(pid);
+    let spawned = std::env::current_exe().and_then(|exe| {
+        let mut command = std::process::Command::new(exe);
+        command.arg("--settings").arg("--config").arg(config_file);
+        if let Some(lang) = lang {
+            command.arg("--lang").arg(lang);
         }
-        _ => log::warn!("the settings window is open already, but cannot be found"),
+        command.spawn()
+    });
+    match spawned {
+        Ok(child) => *open = Some(child),
+        Err(err) => log::error!("cannot open the settings window: {err}"),
     }
-    false
+}
+
+/// Whether no other settings window is open (if one is, it is brought to
+/// the front where the platform allows that).
+fn first_instance() -> bool {
+    os::first_instance()
+}
+
+/// What the settings window needs from Windows.
+#[cfg(windows)]
+mod os {
+    use std::path::{Path, PathBuf};
+
+    use flexflyout_core::layout::MonitorArea;
+    use windows::Win32::Foundation::{ERROR_ALREADY_EXISTS, GetLastError};
+    use windows::Win32::System::Threading::CreateMutexW;
+    use windows::core::w;
+
+    use crate::platform::windows::{autostart, monitor, tray, window};
+
+    pub fn install_fonts(ctx: &eframe::egui::Context) {
+        crate::app::setup_fonts(ctx);
+    }
+
+    pub fn autostart_enabled() -> bool {
+        autostart::is_enabled()
+    }
+
+    pub fn set_autostart(enabled: bool, config_file: &Path) -> anyhow::Result<()> {
+        autostart::set(enabled, config_file)
+    }
+
+    pub fn monitors() -> Vec<MonitorArea> {
+        monitor::list()
+    }
+
+    pub fn open_in_editor(path: &Path) {
+        tray::open_in_editor(path);
+    }
+
+    pub fn open_url(url: &str) {
+        tray::open_url(url);
+    }
+
+    pub fn bring_to_front(pid: u32) {
+        window::bring_process_to_front(pid);
+    }
+
+    /// Where the open settings window's process writes its ID, for a second
+    /// one to find it.
+    fn pid_file() -> PathBuf {
+        std::env::temp_dir().join("flexflyout-settings.pid")
+    }
+
+    /// Whether no other settings window is open. If one is, it is brought to
+    /// the front. The check holds a named mutex for the life of the process
+    /// (Windows releases it when the process ends, even when killed), so a
+    /// left-over ID file of an ended process is never trusted.
+    pub fn first_instance() -> bool {
+        // SAFETY: creates or opens a named mutex; the handle is deliberately
+        // kept open until the process ends.
+        let created = unsafe { CreateMutexW(None, false, w!("Local\\FlexFlyoutSettings")) };
+        // SAFETY: reads this thread's last error, set by the call above.
+        let existed = unsafe { GetLastError() } == ERROR_ALREADY_EXISTS;
+        if created.is_err() || !existed {
+            let _ = std::fs::write(pid_file(), std::process::id().to_string());
+            return true;
+        }
+        match std::fs::read_to_string(pid_file()).map(|text| text.trim().parse::<u32>()) {
+            Ok(Ok(pid)) => {
+                log::info!("the settings window is open already (process {pid})");
+                window::bring_process_to_front(pid);
+            }
+            _ => log::warn!("the settings window is open already, but cannot be found"),
+        }
+        false
+    }
+}
+
+/// What the settings window needs from the Linux desktop.
+#[cfg(target_os = "linux")]
+mod os {
+    use std::path::Path;
+    use std::sync::OnceLock;
+
+    use flexflyout_core::layout::MonitorArea;
+
+    use crate::platform::linux::{desktop, fonts, layer};
+
+    pub fn install_fonts(ctx: &eframe::egui::Context) {
+        flexflyout_ui::fonts::install(ctx, fonts::find());
+    }
+
+    pub fn autostart_enabled() -> bool {
+        desktop::autostart_enabled()
+    }
+
+    pub fn set_autostart(enabled: bool, config_file: &Path) -> anyhow::Result<()> {
+        desktop::set_autostart(enabled, config_file)
+    }
+
+    pub fn monitors() -> Vec<MonitorArea> {
+        layer::outputs()
+    }
+
+    pub fn open_in_editor(path: &Path) {
+        desktop::open_in_editor(path);
+    }
+
+    pub fn open_url(url: &str) {
+        desktop::open_url(url);
+    }
+
+    /// Wayland lets no other program raise a window: nothing to do.
+    pub fn bring_to_front(_pid: u32) {}
+
+    /// Whether no other settings window is open: it holds a lock on a file
+    /// for the life of its process (released when the process ends, even
+    /// when killed).
+    pub fn first_instance() -> bool {
+        static LOCK: OnceLock<std::fs::File> = OnceLock::new();
+        let dir = std::env::var_os("XDG_RUNTIME_DIR")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(std::env::temp_dir);
+        let file = match std::fs::File::create(dir.join("flexflyout-settings.lock")) {
+            Ok(file) => file,
+            // Without the file, a second window is the lesser evil.
+            Err(_) => return true,
+        };
+        match file.try_lock() {
+            Ok(()) => {
+                let _ = LOCK.set(file);
+                true
+            }
+            Err(_) => {
+                log::info!("the settings window is open already");
+                false
+            }
+        }
+    }
 }
 
 /// When the file was last changed.
@@ -251,7 +392,7 @@ impl SettingsWindow {
                 ui.label(egui::RichText::new(error).monospace());
                 ui.horizontal(|ui| {
                     if ui.button(fl!(self.loader, "settings-open-file")).clicked() {
-                        tray::open_in_editor(&self.config_file);
+                        os::open_in_editor(&self.config_file);
                     }
                     if ui.button(fl!(self.loader, "settings-defaults")).clicked() {
                         self.restore_broken_file();
@@ -278,7 +419,7 @@ impl SettingsWindow {
                     if self.config != self.saved {
                         self.write_file();
                     }
-                    tray::open_in_editor(&self.config_file);
+                    os::open_in_editor(&self.config_file);
                 }
                 if ui.button(fl!(self.loader, "settings-defaults")).clicked() {
                     self.config = Config::default();
@@ -302,7 +443,7 @@ impl SettingsWindow {
                 // Opened by the shell: eframe is built without its own
                 // link opener.
                 if ui.link(self.loader.get(id)).on_hover_text(url).clicked() {
-                    tray::open_url(url);
+                    os::open_url(url);
                 }
             }
         });
@@ -335,18 +476,21 @@ impl SettingsWindow {
                     });
                 ui.end_row();
 
-                ui.label(fl!(loader, "settings-native-osd"));
-                ui.vertical(|ui| {
-                    let mode = &mut self.config.general.native_osd;
-                    for (value, id) in [
-                        (NativeOsd::Avoid, "settings-native-osd-avoid"),
-                        (NativeOsd::Hide, "settings-native-osd-hide"),
-                        (NativeOsd::Keep, "settings-native-osd-keep"),
-                    ] {
-                        ui.radio_value(mode, value, loader.get(id));
-                    }
-                });
-                ui.end_row();
+                // Only Windows' volume indicator can be avoided or hidden.
+                if cfg!(windows) {
+                    ui.label(fl!(loader, "settings-native-osd"));
+                    ui.vertical(|ui| {
+                        let mode = &mut self.config.general.native_osd;
+                        for (value, id) in [
+                            (NativeOsd::Avoid, "settings-native-osd-avoid"),
+                            (NativeOsd::Hide, "settings-native-osd-hide"),
+                            (NativeOsd::Keep, "settings-native-osd-keep"),
+                        ] {
+                            ui.radio_value(mode, value, loader.get(id));
+                        }
+                    });
+                    ui.end_row();
+                }
             });
         ui.checkbox(
             &mut self.config.general.show_on_play_pause,
@@ -354,10 +498,10 @@ impl SettingsWindow {
         );
         let mut autostart = self.autostart;
         if ui
-            .checkbox(&mut autostart, fl!(loader, "settings-start-with-windows"))
+            .checkbox(&mut autostart, autostart_label(loader))
             .changed()
         {
-            match autostart::set(autostart, &self.config_file) {
+            match os::set_autostart(autostart, &self.config_file) {
                 Ok(()) => self.autostart = autostart,
                 Err(err) => log::error!("{err:#}"),
             }

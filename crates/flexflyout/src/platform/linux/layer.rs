@@ -674,6 +674,74 @@ impl ProvidesRegistryState for Wayland {
 delegate_registry!(Wayland);
 smithay_client_toolkit::delegate_dispatch2!(Wayland);
 
+/// The monitors, as the settings window lists them: their positions and
+/// sizes in logical pixels, in the order [`Placement::output`] counts them.
+/// Empty without a Wayland session.
+pub fn outputs() -> Vec<flexflyout_core::layout::MonitorArea> {
+    use flexflyout_core::layout::{MonitorArea, PixelRect};
+
+    /// Only the outputs, for a short connection.
+    struct Outputs {
+        registry: RegistryState,
+        outputs: OutputState,
+    }
+    impl OutputHandler for Outputs {
+        fn output_state(&mut self) -> &mut OutputState {
+            &mut self.outputs
+        }
+        fn new_output(&mut self, _: &Connection, _: &QueueHandle<Self>, _: wl_output::WlOutput) {}
+        fn update_output(&mut self, _: &Connection, _: &QueueHandle<Self>, _: wl_output::WlOutput) {
+        }
+        fn output_destroyed(
+            &mut self,
+            _: &Connection,
+            _: &QueueHandle<Self>,
+            _: wl_output::WlOutput,
+        ) {
+        }
+    }
+    impl ProvidesRegistryState for Outputs {
+        fn registry(&mut self) -> &mut RegistryState {
+            &mut self.registry
+        }
+        registry_handlers![OutputState];
+    }
+    delegate_registry!(Outputs);
+    smithay_client_toolkit::delegate_dispatch2!(Outputs);
+
+    let list = || -> Option<Vec<MonitorArea>> {
+        let connection = Connection::connect_to_env().ok()?;
+        let (globals, mut queue) =
+            wayland_client::globals::registry_queue_init::<Outputs>(&connection).ok()?;
+        let mut state = Outputs {
+            registry: RegistryState::new(&globals),
+            outputs: OutputState::new(&globals, &queue.handle()),
+        };
+        // The outputs' details arrive after their announcement.
+        queue.roundtrip(&mut state).ok()?;
+        queue.roundtrip(&mut state).ok()?;
+        Some(
+            state
+                .outputs
+                .outputs()
+                .filter_map(|output| state.outputs.info(&output))
+                .map(|info| {
+                    let (x, y) = info.logical_position.unwrap_or_default();
+                    let (width, height) = info.logical_size.unwrap_or_default();
+                    let bounds = PixelRect::from_origin_size(x, y, width, height);
+                    MonitorArea {
+                        bounds,
+                        work: bounds,
+                        scale: info.scale_factor as f32,
+                        primary: false,
+                    }
+                })
+                .collect(),
+        )
+    };
+    list().unwrap_or_default()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

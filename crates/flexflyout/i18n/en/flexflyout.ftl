@@ -17,6 +17,7 @@ tray-show = Show the flyout
 tray-open-settings = Open the settings file
 tray-reload-settings = Reload the settings
 tray-start-with-windows = Start with Windows
+tray-start-at-login = Start at login
 tray-quit = Quit
 tray-settings = Settings…
 
@@ -33,6 +34,7 @@ settings-native-osd-hide = Hide it (also hides brightness and similar indicators
 settings-native-osd-keep = Keep it and ignore it
 settings-show-on-play-pause = Also show when playback starts or pauses
 settings-start-with-windows = Start with Windows
+settings-start-at-login = Start at login
 settings-display = Display
 settings-monitor = Monitor
 settings-monitor-primary = Primary monitor

@@ -49,8 +49,6 @@ pub enum Trigger {
     /// The player started or paused.
     PlayPause,
     /// The tray icon was clicked.
-    // The Linux host has no tray icon yet.
-    #[cfg_attr(target_os = "linux", allow(dead_code))]
     Tray,
     /// The demo.
     Demo,
@@ -64,4 +62,22 @@ impl Message {
             sent: Instant::now(),
         }
     }
+}
+
+/// What the user picked from the notification area icon.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TrayCommand {
+    /// Show the flyout (also a left click on the icon).
+    Show,
+    /// Open the settings window.
+    Settings,
+    /// Open the settings file in an editor.
+    OpenSettings,
+    /// Read the settings file again now.
+    ReloadSettings,
+    /// Start with Windows (or with the desktop session on Linux), or stop
+    /// doing so (a check mark in the menu).
+    ToggleAutostart,
+    /// End the app.
+    Quit,
 }

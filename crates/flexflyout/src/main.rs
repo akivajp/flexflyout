@@ -24,7 +24,7 @@ mod demo;
 mod linux_app;
 #[cfg(any(windows, target_os = "linux"))]
 mod platform;
-#[cfg(windows)]
+#[cfg(any(windows, target_os = "linux"))]
 mod settings_window;
 
 use std::path::PathBuf;
@@ -112,7 +112,7 @@ fn run(cli: Cli) -> anyhow::Result<()> {
     let loader = i18n::load(settings::language(cli.lang.as_deref(), &config).as_deref())?;
     let labels = i18n::labels(&loader);
 
-    #[cfg(windows)]
+    #[cfg(any(windows, target_os = "linux"))]
     if cli.settings {
         return settings_window::run(config_file, cli.lang);
     }
@@ -134,6 +134,7 @@ fn run(cli: Cli) -> anyhow::Result<()> {
     {
         linux_app::run(
             labels,
+            i18n::tray_labels(&loader),
             config,
             linux_app::Options {
                 config_file,

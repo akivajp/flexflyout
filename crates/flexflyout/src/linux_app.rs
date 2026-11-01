@@ -19,10 +19,12 @@ use wayland_client::Connection;
 use wayland_client::globals::registry_queue_init;
 
 use crate::flyout::{FlyoutState, Received};
-use crate::message::{Message, Trigger};
+use crate::i18n::TrayLabels;
+use crate::message::{Message, TrayCommand, Trigger};
 use crate::platform::linux::layer::{self, Wayland};
 use crate::platform::linux::media::{self, Media};
 use crate::platform::linux::volume::{self, VolumeControl};
+use crate::platform::linux::{desktop, tray};
 
 /// Time between frames while the flyout fades or slides.
 const FRAME: Duration = Duration::from_millis(16);
@@ -61,7 +63,12 @@ struct Host {
 }
 
 /// Runs the flyout until it is asked to quit.
-pub fn run(labels: Labels, config: Config, options: Options) -> anyhow::Result<()> {
+pub fn run(
+    labels: Labels,
+    tray_labels: TrayLabels,
+    config: Config,
+    options: Options,
+) -> anyhow::Result<()> {
     let connection =
         Connection::connect_to_env().context("no Wayland session to show the flyout in")?;
     let (globals, queue) =
@@ -91,10 +98,25 @@ pub fn run(labels: Labels, config: Config, options: Options) -> anyhow::Result<(
 
     // Read by the player's thread, which decides whether to show.
     let show_on_play_pause = Arc::new(AtomicBool::new(config.general.show_on_play_pause));
-    watch_settings(&options, &config, &show_on_play_pause, sender.clone());
+    let reload = watch_settings(&options, &config, &show_on_play_pause, sender.clone());
     let send = move |message: Message| {
         let _ = sender.send(message);
     };
+    let config_file = options.config_file.clone();
+    let lang = options.lang.clone();
+    let to_flyout = send.clone();
+    tray::spawn(tray_labels, move |command| match command {
+        TrayCommand::Show => to_flyout(Message::show(Trigger::Tray)),
+        TrayCommand::Settings => crate::settings_window::open(&config_file, lang.as_deref()),
+        TrayCommand::OpenSettings => desktop::open_in_editor(&config_file),
+        TrayCommand::ReloadSettings => reload.now(),
+        TrayCommand::ToggleAutostart => {
+            if let Err(err) = desktop::set_autostart(!desktop::autostart_enabled(), &config_file) {
+                log::error!("{err:#}");
+            }
+        }
+        TrayCommand::Quit => to_flyout(Message::Quit),
+    });
     let controls = match options.demo {
         Some(cycles) => {
             crate::demo::spawn(cycles, send);
@@ -265,23 +287,26 @@ fn earliest(a: Option<Duration>, b: Option<Duration>) -> Option<Duration> {
 }
 
 /// Sends the settings to the flyout every time the file is saved, with the
-/// texts in the new language when that changed.
+/// texts in the new language when that changed. Returns the handle to
+/// reload them on demand.
 fn watch_settings(
     options: &Options,
     config: &Config,
     show_on_play_pause: &Arc<AtomicBool>,
     sender: Sender<Message>,
-) {
+) -> crate::settings::Reload {
     let lang = options.lang.clone();
     let mut language = crate::settings::language(lang.as_deref(), config);
     let show_on_play_pause = Arc::clone(show_on_play_pause);
-    // The handle to reload on demand is for the tray, which comes later.
-    let _ = crate::settings::watch(options.config_file.clone(), move |config| {
+    crate::settings::watch(options.config_file.clone(), move |config| {
         show_on_play_pause.store(config.general.show_on_play_pause, Ordering::Relaxed);
         let new_language = crate::settings::language(lang.as_deref(), &config);
         let labels = (new_language != language)
             .then(|| match crate::i18n::load(new_language.as_deref()) {
-                Ok(loader) => Some(crate::i18n::labels(&loader)),
+                Ok(loader) => {
+                    tray::set_labels(crate::i18n::tray_labels(&loader));
+                    Some(crate::i18n::labels(&loader))
+                }
                 Err(err) => {
                     log::error!("{err:#}");
                     None
@@ -295,5 +320,5 @@ fn watch_settings(
             config: Box::new(config),
             labels,
         });
-    });
+    })
 }

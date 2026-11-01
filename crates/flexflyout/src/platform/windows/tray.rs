@@ -29,22 +29,7 @@ use windows::core::{HSTRING, PCWSTR, w};
 
 use crate::i18n::TrayLabels;
 
-/// What the user picked from the icon.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum TrayCommand {
-    /// Show the flyout (also a left click on the icon).
-    Show,
-    /// Open the settings window.
-    Settings,
-    /// Open the settings file in an editor.
-    OpenSettings,
-    /// Read the settings file again now.
-    ReloadSettings,
-    /// Start with Windows, or stop doing so (a check mark in the menu).
-    ToggleAutostart,
-    /// End the app.
-    Quit,
-}
+pub use crate::message::TrayCommand;
 
 /// The menu, in order: command ID (0 = a separator) and command.
 const MENU: [(usize, Option<TrayCommand>); 9] = [
@@ -278,7 +263,7 @@ fn show_menu(hwnd: HWND) {
         TrayCommand::Settings => &labels.settings,
         TrayCommand::OpenSettings => &labels.open_settings,
         TrayCommand::ReloadSettings => &labels.reload_settings,
-        TrayCommand::ToggleAutostart => &labels.start_with_windows,
+        TrayCommand::ToggleAutostart => &labels.autostart,
         TrayCommand::Quit => &labels.quit,
     };
     // Read every time: the Task Manager can change it meanwhile.

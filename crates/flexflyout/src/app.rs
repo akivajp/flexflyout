@@ -251,7 +251,7 @@ impl FlyoutApp {
             TrayCommand::Show => to_window(Message::show(Trigger::Tray)),
             TrayCommand::OpenSettings => tray::open_in_editor(&config_file),
             TrayCommand::ReloadSettings => reload.now(),
-            TrayCommand::Settings => open_settings_window(&config_file, lang.as_deref()),
+            TrayCommand::Settings => crate::settings_window::open(&config_file, lang.as_deref()),
             TrayCommand::ToggleAutostart => {
                 if let Err(err) = autostart::set(!autostart::is_enabled(), &config_file) {
                     log::error!("{err:#}");
@@ -604,31 +604,6 @@ impl FlyoutApp {
             (_, Some(controls)) => controls.media.command(command),
             (_, None) => {}
         }
-    }
-}
-
-/// Opens the settings window (`--settings`, a process of its own), or
-/// brings it to the front if it is open already.
-fn open_settings_window(config_file: &std::path::Path, lang: Option<&str>) {
-    static OPEN: Mutex<Option<std::process::Child>> = Mutex::new(None);
-    let mut open = OPEN.lock().unwrap_or_else(PoisonError::into_inner);
-    if let Some(child) = open.as_mut()
-        && matches!(child.try_wait(), Ok(None))
-    {
-        window::bring_process_to_front(child.id());
-        return;
-    }
-    let spawned = std::env::current_exe().and_then(|exe| {
-        let mut command = std::process::Command::new(exe);
-        command.arg("--settings").arg("--config").arg(config_file);
-        if let Some(lang) = lang {
-            command.arg("--lang").arg(lang);
-        }
-        command.spawn()
-    });
-    match spawned {
-        Ok(child) => *open = Some(child),
-        Err(err) => log::error!("cannot open the settings window: {err}"),
     }
 }
 

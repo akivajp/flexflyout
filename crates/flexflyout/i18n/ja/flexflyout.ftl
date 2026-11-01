@@ -17,6 +17,7 @@ tray-show = Flyout を表示
 tray-open-settings = 設定ファイルを開く
 tray-reload-settings = 設定を読み込み直す
 tray-start-with-windows = Windows の起動時に開始
+tray-start-at-login = ログイン時に開始
 tray-quit = 終了
 tray-settings = 設定…
 
@@ -33,6 +34,7 @@ settings-native-osd-hide = 消す（明るさなどの表示も消えます）
 settings-native-osd-keep = 残して、重なっても気にしない
 settings-show-on-play-pause = 再生・一時停止したときにも表示する
 settings-start-with-windows = Windows の起動時に開始する
+settings-start-at-login = ログイン時に開始する
 settings-display = 表示
 settings-monitor = 表示するモニター
 settings-monitor-primary = メインのモニター

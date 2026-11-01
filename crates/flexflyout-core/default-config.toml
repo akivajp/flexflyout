@@ -8,7 +8,8 @@
 # Language of the texts: "auto" (the system's), "en" or "ja".
 language = "auto"
 
-# What to do with the Windows volume indicator:
+# What to do with the Windows volume indicator (Windows only; on KDE Plasma,
+# its own volume popup can be turned off in its audio settings):
 #   "avoid" - leave it, and move the flyout out of its way if they overlap
 #   "hide"  - hide it. Windows uses the same window for the brightness,
 #             airplane mode and similar indicators, which are hidden too.

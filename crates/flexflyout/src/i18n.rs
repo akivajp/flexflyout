@@ -50,8 +50,8 @@ pub struct TrayLabels {
     pub open_settings: String,
     /// Read the settings again.
     pub reload_settings: String,
-    /// Start with Windows (a check box).
-    pub start_with_windows: String,
+    /// Start with Windows, or at login on Linux (a check box).
+    pub autostart: String,
     /// End the app.
     pub quit: String,
 }
@@ -64,7 +64,10 @@ pub fn tray_labels(loader: &FluentLanguageLoader) -> TrayLabels {
         settings: fl!(loader, "tray-settings"),
         open_settings: fl!(loader, "tray-open-settings"),
         reload_settings: fl!(loader, "tray-reload-settings"),
-        start_with_windows: fl!(loader, "tray-start-with-windows"),
+        #[cfg(windows)]
+        autostart: fl!(loader, "tray-start-with-windows"),
+        #[cfg(not(windows))]
+        autostart: fl!(loader, "tray-start-at-login"),
         quit: fl!(loader, "tray-quit"),
     }
 }

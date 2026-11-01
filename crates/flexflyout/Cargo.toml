@@ -64,7 +64,11 @@ windows = { version = "0.62", features = [
 # run time, so no development packages are needed to build.
 [target.'cfg(target_os = "linux")'.dependencies]
 egui = "0.37"
+# The settings window is a normal window, which winit can make.
+eframe = { version = "0.37", default-features = false, features = ["wgpu", "wayland", "x11"] }
 egui-wgpu = "0.37"
+# The tray icon (StatusNotifierItem), on the same zbus as MPRIS.
+ksni = { version = "0.3", default-features = false, features = ["blocking", "async-io"] }
 # Cover art from players' files or the web addresses they give (Spotify).
 image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp"] }
 pollster = "0.4"

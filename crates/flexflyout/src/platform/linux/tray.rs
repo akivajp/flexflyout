@@ -1,0 +1,129 @@
+//! The notification area icon (a StatusNotifierItem, which KDE Plasma and
+//! most other desktops show; GNOME needs an extension) and its menu, the
+//! same as on Windows.
+
+use std::sync::OnceLock;
+
+use ksni::blocking::TrayMethods as _;
+
+use crate::i18n::TrayLabels;
+use crate::message::TrayCommand;
+
+/// The running icon, to change its texts.
+static HANDLE: OnceLock<ksni::blocking::Handle<Tray>> = OnceLock::new();
+
+/// The icon's state, read by the D-Bus service.
+struct Tray {
+    labels: TrayLabels,
+    on_command: Box<dyn Fn(TrayCommand) + Send + Sync>,
+    icon: Vec<ksni::Icon>,
+}
+
+/// Adds the icon. `on_command` is called on the tray's thread.
+pub fn spawn(labels: TrayLabels, on_command: impl Fn(TrayCommand) + Send + Sync + 'static) {
+    let tray = Tray {
+        labels,
+        on_command: Box::new(on_command),
+        icon: icon(),
+    };
+    match tray.spawn() {
+        Ok(handle) => {
+            let _ = HANDLE.set(handle);
+        }
+        // No StatusNotifierWatcher (GNOME without an extension): the
+        // flyout still works, only without the icon.
+        Err(err) => log::warn!("no tray icon: {err}"),
+    }
+}
+
+/// Changes the menu's texts (after the language changed).
+pub fn set_labels(labels: TrayLabels) {
+    if let Some(handle) = HANDLE.get() {
+        handle.update(|tray| tray.labels = labels);
+    }
+}
+
+impl ksni::Tray for Tray {
+    fn id(&self) -> String {
+        "flexflyout".into()
+    }
+
+    fn title(&self) -> String {
+        "FlexFlyout".into()
+    }
+
+    fn icon_pixmap(&self) -> Vec<ksni::Icon> {
+        self.icon.clone()
+    }
+
+    fn tool_tip(&self) -> ksni::ToolTip {
+        ksni::ToolTip {
+            title: "FlexFlyout".into(),
+            ..Default::default()
+        }
+    }
+
+    /// A left click shows the flyout, as on Windows.
+    fn activate(&mut self, _x: i32, _y: i32) {
+        (self.on_command)(TrayCommand::Show);
+    }
+
+    fn menu(&self) -> Vec<ksni::MenuItem<Self>> {
+        use ksni::menu::{CheckmarkItem, MenuItem, StandardItem};
+        let item = |label: &str, command: TrayCommand| -> MenuItem<Self> {
+            StandardItem {
+                label: label.to_owned(),
+                activate: Box::new(move |tray: &mut Self| (tray.on_command)(command)),
+                ..Default::default()
+            }
+            .into()
+        };
+        let labels = &self.labels;
+        vec![
+            item(&labels.show, TrayCommand::Show),
+            MenuItem::Separator,
+            item(&labels.settings, TrayCommand::Settings),
+            item(&labels.open_settings, TrayCommand::OpenSettings),
+            item(&labels.reload_settings, TrayCommand::ReloadSettings),
+            MenuItem::Separator,
+            CheckmarkItem {
+                label: labels.autostart.clone(),
+                // Read every time the menu is built.
+                checked: super::desktop::autostart_enabled(),
+                activate: Box::new(|tray: &mut Self| {
+                    (tray.on_command)(TrayCommand::ToggleAutostart);
+                }),
+                ..Default::default()
+            }
+            .into(),
+            MenuItem::Separator,
+            item(&labels.quit, TrayCommand::Quit),
+        ]
+    }
+}
+
+/// The app's icon in the sizes panels ask for, from the embedded PNG.
+fn icon() -> Vec<ksni::Icon> {
+    let Ok(image) = image::load_from_memory(include_bytes!("../../../assets/flexflyout.png"))
+    else {
+        return Vec::new();
+    };
+    [22, 32, 48, 64]
+        .into_iter()
+        .map(|size| {
+            let rgba = image
+                .resize_exact(size, size, image::imageops::FilterType::Lanczos3)
+                .to_rgba8();
+            // ARGB in network byte order.
+            let data = rgba
+                .pixels()
+                .flat_map(|p| [p[3], p[0], p[1], p[2]])
+                .collect();
+            ksni::Icon {
+                width: size as i32,
+                height: size as i32,
+                data,
+            }
+        })
+        .collect()
+}
