@@ -20,6 +20,8 @@ mod app;
 mod demo;
 #[cfg(windows)]
 mod platform;
+#[cfg(windows)]
+mod settings_window;
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -54,8 +56,13 @@ struct Cli {
     #[arg(long, value_name = "PATH")]
     config: Option<PathBuf>,
 
-    /// Where to write the log
-    /// (default: %LOCALAPPDATA%\flexflyout\flexflyout.log on Windows).
+    /// Open the settings window instead of the flyout. A running flyout
+    /// applies the changes as they are made.
+    #[arg(long, conflicts_with = "demo")]
+    settings: bool,
+
+    /// Where to write the log (default: flexflyout.log, or settings.log
+    /// with --settings, in %LOCALAPPDATA%\flexflyout on Windows).
     #[arg(long, value_name = "PATH")]
     log_file: Option<PathBuf>,
 
@@ -80,7 +87,15 @@ fn main() -> ExitCode {
 
 /// Sets up logging and the translations, then hands over to the host.
 fn run(cli: Cli) -> anyhow::Result<()> {
-    let log_file = cli.log_file.clone().unwrap_or_else(default_log_file);
+    let log_name = if cli.settings {
+        "settings.log"
+    } else {
+        "flexflyout.log"
+    };
+    let log_file = cli
+        .log_file
+        .clone()
+        .unwrap_or_else(|| default_log_dir().join(log_name));
     init_logging(&log_file)
         .with_context(|| format!("cannot write the log to {}", log_file.display()))?;
     log::info!(
@@ -93,6 +108,10 @@ fn run(cli: Cli) -> anyhow::Result<()> {
     let loader = i18n::load(settings::language(cli.lang.as_deref(), &config).as_deref())?;
     let labels = i18n::labels(&loader);
 
+    #[cfg(windows)]
+    if cli.settings {
+        return settings_window::run(config_file, cli.lang);
+    }
     #[cfg(windows)]
     {
         app::run(
@@ -114,12 +133,12 @@ fn run(cli: Cli) -> anyhow::Result<()> {
     }
 }
 
-/// Default place of the log: next to the other per-user data of the app.
-fn default_log_file() -> PathBuf {
+/// Default folder of the logs: next to the other per-user data of the app.
+fn default_log_dir() -> PathBuf {
     let base = std::env::var_os("LOCALAPPDATA")
         .map(PathBuf::from)
         .unwrap_or_else(std::env::temp_dir);
-    base.join("flexflyout").join("flexflyout.log")
+    base.join("flexflyout")
 }
 
 /// Writes the log to `path` (overwritten on every start) and logs panics,

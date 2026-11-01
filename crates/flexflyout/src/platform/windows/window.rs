@@ -17,10 +17,11 @@ use windows::Win32::Graphics::Dwm::{DWMWA_BORDER_COLOR, DWMWA_COLOR_NONE, DwmSet
 use windows::Win32::Graphics::Gdi::{BLACK_BRUSH, GetStockObject};
 use windows::Win32::UI::Shell::{DefSubclassProc, SetWindowSubclass};
 use windows::Win32::UI::WindowsAndMessaging::{
-    GCLP_HBRBACKGROUND, GWL_EXSTYLE, GetForegroundWindow, GetWindowLongPtrW, GetWindowRect,
-    GetWindowTextW, HWND_TOPMOST, IsWindowVisible, MA_NOACTIVATE, SET_WINDOW_POS_FLAGS,
-    STYLESTRUCT, SW_HIDE, SWP_ASYNCWINDOWPOS, SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE,
-    SWP_NOSIZE, SWP_NOZORDER, SWP_SHOWWINDOW, SetClassLongPtrW, SetWindowLongPtrW, SetWindowPos,
+    EnumWindows, GCLP_HBRBACKGROUND, GWL_EXSTYLE, GetForegroundWindow, GetWindowLongPtrW,
+    GetWindowRect, GetWindowTextW, GetWindowThreadProcessId, HWND_TOPMOST, IsIconic,
+    IsWindowVisible, MA_NOACTIVATE, SET_WINDOW_POS_FLAGS, STYLESTRUCT, SW_HIDE, SW_RESTORE,
+    SWP_ASYNCWINDOWPOS, SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER,
+    SWP_SHOWWINDOW, SetClassLongPtrW, SetForegroundWindow, SetWindowLongPtrW, SetWindowPos,
     ShowWindow, WINDOW_EX_STYLE, WM_MOUSEACTIVATE, WM_MOUSEMOVE, WM_STYLECHANGING, WS_EX_APPWINDOW,
     WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
 };
@@ -220,5 +221,42 @@ pub fn foreground_window_title() -> String {
         let mut buf = [0u16; 256];
         let len = GetWindowTextW(GetForegroundWindow(), &mut buf);
         String::from_utf16_lossy(&buf[..len.max(0) as usize])
+    }
+}
+
+/// Brings the visible top-level window of process `pid` to the front (the
+/// settings window, when it is asked for again while open). Restores it if
+/// it is minimized.
+pub fn bring_process_to_front(pid: u32) {
+    /// Finds the window: `lparam` points to (pid, found window).
+    unsafe extern "system" fn find(hwnd: HWND, lparam: LPARAM) -> windows::core::BOOL {
+        // SAFETY: `lparam` is the pointer passed below, alive during the
+        // enumeration.
+        let search = unsafe { &mut *(lparam.0 as *mut (u32, Option<HWND>)) };
+        let mut owner = 0;
+        // SAFETY: plain queries on a window being enumerated.
+        let visible = unsafe {
+            GetWindowThreadProcessId(hwnd, Some(&mut owner));
+            IsWindowVisible(hwnd).as_bool()
+        };
+        if owner == search.0 && visible {
+            search.1 = Some(hwnd);
+            return false.into(); // Stop.
+        }
+        true.into()
+    }
+    let mut search: (u32, Option<HWND>) = (pid, None);
+    // SAFETY: the callback only touches `search`, which outlives the call.
+    // EnumWindows reports an error when the callback stops it early.
+    let _ = unsafe { EnumWindows(Some(find), LPARAM(&mut search as *mut _ as isize)) };
+    if let Some(hwnd) = search.1 {
+        // SAFETY: plain window calls; the tray thread just had the
+        // foreground (its menu), which allows handing it on.
+        unsafe {
+            if IsIconic(hwnd).as_bool() {
+                let _ = ShowWindow(hwnd, SW_RESTORE);
+            }
+            let _ = SetForegroundWindow(hwnd);
+        }
     }
 }

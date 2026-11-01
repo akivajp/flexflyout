@@ -44,6 +44,8 @@ pub fn load(lang: Option<&str>) -> anyhow::Result<FluentLanguageLoader> {
 pub struct TrayLabels {
     /// Show the flyout.
     pub show: String,
+    /// Open the settings window.
+    pub settings: String,
     /// Open the settings file.
     pub open_settings: String,
     /// Read the settings again.
@@ -59,6 +61,7 @@ pub struct TrayLabels {
 pub fn tray_labels(loader: &FluentLanguageLoader) -> TrayLabels {
     TrayLabels {
         show: fl!(loader, "tray-show"),
+        settings: fl!(loader, "tray-settings"),
         open_settings: fl!(loader, "tray-open-settings"),
         reload_settings: fl!(loader, "tray-reload-settings"),
         start_with_windows: fl!(loader, "tray-start-with-windows"),

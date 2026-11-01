@@ -295,17 +295,15 @@ impl FlyoutApp {
         let show_on_play_pause = Arc::new(AtomicBool::new(config.general.show_on_play_pause));
         let reload = watch_settings(&options, &config, &show_on_play_pause, send.clone());
         let config_file = options.config_file.clone();
+        let lang = options.lang.clone();
         let to_window = send.clone();
         tray::spawn(tray_labels, move |command| match command {
             TrayCommand::Show => to_window(Message::show(Trigger::Tray)),
             TrayCommand::OpenSettings => tray::open_in_editor(&config_file),
             TrayCommand::ReloadSettings => reload.now(),
+            TrayCommand::Settings => open_settings_window(&config_file, lang.as_deref()),
             TrayCommand::ToggleAutostart => {
-                // Started with Windows, a settings file of one's own must
-                // still be the one read.
-                let custom = config_file != crate::settings::default_file();
-                let enable = !autostart::is_enabled();
-                if let Err(err) = autostart::set(enable, custom.then_some(config_file.as_path())) {
+                if let Err(err) = autostart::set(!autostart::is_enabled(), &config_file) {
                     log::error!("{err:#}");
                 }
             }
@@ -651,6 +649,31 @@ impl FlyoutApp {
     }
 }
 
+/// Opens the settings window (`--settings`, a process of its own), or
+/// brings it to the front if it is open already.
+fn open_settings_window(config_file: &std::path::Path, lang: Option<&str>) {
+    static OPEN: Mutex<Option<std::process::Child>> = Mutex::new(None);
+    let mut open = OPEN.lock().unwrap_or_else(PoisonError::into_inner);
+    if let Some(child) = open.as_mut()
+        && matches!(child.try_wait(), Ok(None))
+    {
+        window::bring_process_to_front(child.id());
+        return;
+    }
+    let spawned = std::env::current_exe().and_then(|exe| {
+        let mut command = std::process::Command::new(exe);
+        command.arg("--settings").arg("--config").arg(config_file);
+        if let Some(lang) = lang {
+            command.arg("--lang").arg(lang);
+        }
+        command.spawn()
+    });
+    match spawned {
+        Ok(child) => *open = Some(child),
+        Err(err) => log::error!("cannot open the settings window: {err}"),
+    }
+}
+
 /// Uses the Windows UI fonts so that the flyout looks native: Segoe UI for
 /// Latin text, then a Japanese font (titles can be Japanese whatever the GUI
 /// language is), then egui's own fonts for anything else. Returns the fonts
@@ -658,7 +681,7 @@ impl FlyoutApp {
 ///
 /// Whole font files stay in memory, so only one per script is loaded for
 /// now. Chinese and Korean fonts can be added on demand later.
-fn setup_fonts(ctx: &egui::Context) -> Vec<(String, f32)> {
+pub(crate) fn setup_fonts(ctx: &egui::Context) -> Vec<(String, f32)> {
     // In order of preference: the first file found in each group is used.
     let groups: [&[&str]; 2] = [
         &[r"C:\Windows\Fonts\segoeui.ttf"],

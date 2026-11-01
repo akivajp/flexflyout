@@ -33,6 +33,8 @@ use crate::i18n::TrayLabels;
 pub enum TrayCommand {
     /// Show the flyout (also a left click on the icon).
     Show,
+    /// Open the settings window.
+    Settings,
     /// Open the settings file in an editor.
     OpenSettings,
     /// Read the settings file again now.
@@ -44,9 +46,10 @@ pub enum TrayCommand {
 }
 
 /// The menu, in order: command ID (0 = a separator) and command.
-const MENU: [(usize, Option<TrayCommand>); 8] = [
+const MENU: [(usize, Option<TrayCommand>); 9] = [
     (1, Some(TrayCommand::Show)),
     (0, None),
+    (6, Some(TrayCommand::Settings)),
     (2, Some(TrayCommand::OpenSettings)),
     (3, Some(TrayCommand::ReloadSettings)),
     (0, None),
@@ -260,6 +263,7 @@ fn show_menu(hwnd: HWND) {
         .clone();
     let text = |command: TrayCommand| match command {
         TrayCommand::Show => &labels.show,
+        TrayCommand::Settings => &labels.settings,
         TrayCommand::OpenSettings => &labels.open_settings,
         TrayCommand::ReloadSettings => &labels.reload_settings,
         TrayCommand::ToggleAutostart => &labels.start_with_windows,

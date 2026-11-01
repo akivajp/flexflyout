@@ -42,9 +42,10 @@ pub fn is_enabled() -> bool {
     exists && !disabled_in_task_manager()
 }
 
-/// Makes FlexFlyout start with Windows, with `config` when it is not the
-/// default settings file, or stops it from doing so.
-pub fn set(enabled: bool, config: Option<&Path>) -> anyhow::Result<()> {
+/// Makes FlexFlyout start with Windows, reading `config_file` (passed with
+/// `--config` when it is not the default one), or stops it from doing so.
+pub fn set(enabled: bool, config_file: &Path) -> anyhow::Result<()> {
+    let config = (config_file != crate::settings::default_file()).then_some(config_file);
     if !enabled {
         // SAFETY: deletes our own value.
         let result = unsafe { RegDeleteKeyValueW(HKEY_CURRENT_USER, RUN, NAME) };
