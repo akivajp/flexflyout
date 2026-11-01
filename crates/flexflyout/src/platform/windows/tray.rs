@@ -10,7 +10,7 @@ use std::sync::atomic::{AtomicIsize, AtomicU32, Ordering};
 use std::sync::{Mutex, OnceLock, PoisonError};
 
 use anyhow::Context as _;
-use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, WPARAM};
+use windows::Win32::Foundation::{HINSTANCE, HWND, LPARAM, LRESULT, POINT, WPARAM};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::Shell::{
     ASSOCF_INIT_IGNOREUNKNOWN, ASSOCSTR_EXECUTABLE, AssocQueryStringW, NIF_ICON, NIF_MESSAGE,
@@ -18,11 +18,12 @@ use windows::Win32::UI::Shell::{
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     AppendMenuW, CreateIcon, CreatePopupMenu, CreateWindowExW, DefWindowProcW, DestroyMenu,
-    DispatchMessageW, GetCursorPos, GetMessageW, HICON, MF_CHECKED, MF_SEPARATOR, MF_STRING, MSG,
-    PostMessageW, RegisterClassW, RegisterWindowMessageW, SW_SHOWNORMAL, SetForegroundWindow,
-    TPM_NONOTIFY, TPM_RETURNCMD, TPM_RIGHTBUTTON, TrackPopupMenu, TranslateMessage,
-    WINDOW_EX_STYLE, WINDOW_STYLE, WM_APP, WM_CONTEXTMENU, WM_LBUTTONUP, WM_NULL, WM_RBUTTONUP,
-    WNDCLASSW,
+    DispatchMessageW, GetCursorPos, GetMessageW, GetSystemMetrics, HICON, IMAGE_ICON,
+    LR_DEFAULTCOLOR, LoadImageW, MF_CHECKED, MF_SEPARATOR, MF_STRING, MSG, PostMessageW,
+    RegisterClassW, RegisterWindowMessageW, SM_CXSMICON, SM_CYSMICON, SW_SHOWNORMAL,
+    SetForegroundWindow, TPM_NONOTIFY, TPM_RETURNCMD, TPM_RIGHTBUTTON, TrackPopupMenu,
+    TranslateMessage, WINDOW_EX_STYLE, WINDOW_STYLE, WM_APP, WM_CONTEXTMENU, WM_LBUTTONUP, WM_NULL,
+    WM_RBUTTONUP, WNDCLASSW,
 };
 use windows::core::{HSTRING, PCWSTR, w};
 
@@ -322,57 +323,83 @@ fn carry_out(command: TrayCommand) {
     }
 }
 
-/// The icon, drawn once: three rising bars (a volume meter) on a blue
-/// rounded square, 32 × 32 with smooth edges.
+/// The app's icon at the size of the notification area, from the
+/// executable's resources (ID 1, see build.rs), or the drawn one in a
+/// build without resources.
 fn icon() -> HICON {
     static ICON: OnceLock<isize> = OnceLock::new();
     let raw = *ICON.get_or_init(|| {
-        const SIZE: usize = 32;
-        let mut bgra = vec![0u8; SIZE * SIZE * 4];
-        for y in 0..SIZE {
-            for x in 0..SIZE {
-                // Coverage of each shape from 4 × 4 samples per pixel.
-                let (mut back, mut bar) = (0u32, 0u32);
-                for sy in 0..4 {
-                    for sx in 0..4 {
-                        let px = x as f32 + (sx as f32 + 0.5) / 4.0;
-                        let py = y as f32 + (sy as f32 + 0.5) / 4.0;
-                        back += u32::from(in_rounded_square(px, py, SIZE as f32, 7.0));
-                        bar += u32::from(in_bars(px, py));
-                    }
-                }
-                let (back, bar) = (back as f32 / 16.0, bar as f32 / 16.0);
-                // White bars over blue (90, 160, 255), premultiplied.
-                let color = |blue_part: f32| (blue_part * (1.0 - bar) + 255.0 * bar) * back;
-                let i = (y * SIZE + x) * 4;
-                bgra[i] = color(255.0) as u8;
-                bgra[i + 1] = color(160.0) as u8;
-                bgra[i + 2] = color(90.0) as u8;
-                bgra[i + 3] = (back * 255.0) as u8;
-            }
-        }
-        // A 32-bit icon takes its transparency from the alpha channel; the
-        // AND mask must exist but is ignored when it is all zeros.
-        let mask = [0u8; SIZE * SIZE / 8];
-        // SAFETY: both buffers have the sizes CreateIcon expects.
-        unsafe {
-            CreateIcon(
-                None,
-                SIZE as i32,
-                SIZE as i32,
-                1,
-                32,
-                mask.as_ptr(),
-                bgra.as_ptr(),
+        // SAFETY: loads an icon resource of this executable; the size is the
+        // small icon size for the current DPI, so Windows picks the closest
+        // image of the ICO instead of scaling the large one.
+        let loaded = unsafe {
+            let module = GetModuleHandleW(None).ok();
+            LoadImageW(
+                module.map(|module| HINSTANCE(module.0)),
+                // MAKEINTRESOURCE(1): the ID in place of a name.
+                PCWSTR(std::ptr::without_provenance(1)),
+                IMAGE_ICON,
+                GetSystemMetrics(SM_CXSMICON),
+                GetSystemMetrics(SM_CYSMICON),
+                LR_DEFAULTCOLOR,
             )
+        };
+        match loaded {
+            Ok(handle) => handle.0 as isize,
+            Err(_) => drawn_icon(),
         }
-        .map(|icon| icon.0 as isize)
-        .unwrap_or_else(|err| {
-            log::warn!("cannot create the tray icon image: {err}");
-            0
-        })
     });
     HICON(raw as *mut _)
+}
+
+/// A stand-in for builds without the icon resource (cross builds from
+/// Linux): three rising bars (a volume meter) on a blue rounded square,
+/// 32 × 32 with smooth edges.
+fn drawn_icon() -> isize {
+    const SIZE: usize = 32;
+    let mut bgra = vec![0u8; SIZE * SIZE * 4];
+    for y in 0..SIZE {
+        for x in 0..SIZE {
+            // Coverage of each shape from 4 × 4 samples per pixel.
+            let (mut back, mut bar) = (0u32, 0u32);
+            for sy in 0..4 {
+                for sx in 0..4 {
+                    let px = x as f32 + (sx as f32 + 0.5) / 4.0;
+                    let py = y as f32 + (sy as f32 + 0.5) / 4.0;
+                    back += u32::from(in_rounded_square(px, py, SIZE as f32, 7.0));
+                    bar += u32::from(in_bars(px, py));
+                }
+            }
+            let (back, bar) = (back as f32 / 16.0, bar as f32 / 16.0);
+            // White bars over blue (90, 160, 255), premultiplied.
+            let color = |blue_part: f32| (blue_part * (1.0 - bar) + 255.0 * bar) * back;
+            let i = (y * SIZE + x) * 4;
+            bgra[i] = color(255.0) as u8;
+            bgra[i + 1] = color(160.0) as u8;
+            bgra[i + 2] = color(90.0) as u8;
+            bgra[i + 3] = (back * 255.0) as u8;
+        }
+    }
+    // A 32-bit icon takes its transparency from the alpha channel; the
+    // AND mask must exist but is ignored when it is all zeros.
+    let mask = [0u8; SIZE * SIZE / 8];
+    // SAFETY: both buffers have the sizes CreateIcon expects.
+    unsafe {
+        CreateIcon(
+            None,
+            SIZE as i32,
+            SIZE as i32,
+            1,
+            32,
+            mask.as_ptr(),
+            bgra.as_ptr(),
+        )
+    }
+    .map(|icon| icon.0 as isize)
+    .unwrap_or_else(|err| {
+        log::warn!("cannot create the tray icon image: {err}");
+        0
+    })
 }
 
 /// Whether a point lies in a square of side `size` with rounded corners.

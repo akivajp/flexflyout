@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <!-- FlexFlyout: a play button and a rising volume meter on the accent blue. -->
+  <defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#6fb1ff"/><stop offset="1" stop-color="#3d63e6"/></linearGradient></defs>
+  <rect x="8" y="8" width="240" height="240" rx="56" fill="url(#g)"/>
+  <path d="M52 70 L52 186 Q52 198 62 192 L146 138 Q155 128 146 118 L62 64 Q52 58 52 70 Z" fill="#ffffff"/>
+  <rect x="160" y="150" width="20" height="40" rx="6" fill="#ffffff"/>
+  <rect x="184" y="114" width="20" height="76" rx="6" fill="#ffffff"/>
+  <rect x="208" y="78" width="20" height="112" rx="6" fill="#ffffff" opacity="0.55"/>
+</svg>

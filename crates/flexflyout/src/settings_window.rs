@@ -46,7 +46,8 @@ pub fn run(config_file: PathBuf, lang: Option<String>) -> anyhow::Result<()> {
         viewport: egui::ViewportBuilder::default()
             .with_title(fl!(state.loader, "settings-title"))
             .with_inner_size([480.0, 620.0])
-            .with_min_inner_size([400.0, 320.0]),
+            .with_min_inner_size([400.0, 320.0])
+            .with_icon(icon()),
         ..Default::default()
     };
     eframe::run_native(
@@ -179,6 +180,13 @@ impl SettingsWindow {
             }
         }
     }
+}
+
+/// The app's icon for the title bar, the taskbar and Alt+Tab (the
+/// executable's own icon is not used for a window unless it is set).
+fn icon() -> egui::IconData {
+    eframe::icon_data::from_png_bytes(include_bytes!("../assets/flexflyout.png"))
+        .unwrap_or_default()
 }
 
 /// Where the open settings window's process writes its ID, for a second
