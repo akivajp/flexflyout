@@ -9,8 +9,11 @@
 language = "auto"
 
 # What to do with the Windows volume indicator:
-#   "avoid" - leave it, and place the flyout so that the two do not overlap
-#   "hide"  - hide it
+#   "avoid" - leave it, and move the flyout out of its way if they overlap
+#   "hide"  - hide it. Windows uses the same window for the brightness,
+#             airplane mode and similar indicators, which are hidden too.
+#             It comes back when FlexFlyout quits (or at its next start, if
+#             it was ended from the Task Manager).
 #   "keep"  - leave it and ignore it (the two may overlap)
 native_osd = "avoid"
 

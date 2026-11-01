@@ -46,6 +46,83 @@ impl PixelRect {
     pub fn contains(&self, (x, y): (i32, i32)) -> bool {
         (self.left..self.right).contains(&x) && (self.top..self.bottom).contains(&y)
     }
+
+    /// Whether the two rectangles share any pixel.
+    pub fn intersects(&self, other: &PixelRect) -> bool {
+        self.left < other.right
+            && other.left < self.right
+            && self.top < other.bottom
+            && other.top < self.bottom
+    }
+
+    /// The rectangle grown by `margin` pixels on every side.
+    pub fn expanded(&self, margin: i32) -> Self {
+        Self {
+            left: self.left - margin,
+            top: self.top - margin,
+            right: self.right + margin,
+            bottom: self.bottom + margin,
+        }
+    }
+
+    /// The same rectangle moved by `(dx, dy)`.
+    pub fn translated(&self, dx: i32, dy: i32) -> Self {
+        Self::from_origin_size(self.left + dx, self.top + dy, self.width(), self.height())
+    }
+
+    /// Whether `other` lies entirely inside.
+    pub fn encloses(&self, other: &PixelRect) -> bool {
+        self.left <= other.left
+            && self.top <= other.top
+            && other.right <= self.right
+            && other.bottom <= self.bottom
+    }
+}
+
+/// Size of the Windows 11 volume indicator at 100% display scaling, in
+/// pixels, including its transparent margin (measured on 26H2).
+pub const NATIVE_OSD_SIZE: (i32, i32) = (234, 62);
+
+/// Where the Windows 11 volume indicator appears on a monitor, before it
+/// has been seen: centered at the bottom of the work area.
+pub fn native_osd_estimate(monitor: &MonitorArea) -> PixelRect {
+    let work = monitor.work;
+    let width = (NATIVE_OSD_SIZE.0 as f32 * monitor.scale).round() as i32;
+    let height = (NATIVE_OSD_SIZE.1 as f32 * monitor.scale).round() as i32;
+    PixelRect::from_origin_size(
+        work.left + (work.width() - width) / 2,
+        work.bottom - height,
+        width,
+        height,
+    )
+}
+
+/// Moves `rect` the shortest distance that keeps it `gap` pixels clear of
+/// `obstacle` and inside `work`: up or down first (the flyout keeps its
+/// column), then left or right. Returns `rect` unchanged if it does not
+/// overlap, or if no such position exists.
+pub fn avoid(rect: PixelRect, obstacle: PixelRect, work: PixelRect, gap: i32) -> PixelRect {
+    let blocked = obstacle.expanded(gap);
+    if !rect.intersects(&blocked) {
+        return rect;
+    }
+    let vertical = [
+        rect.translated(0, blocked.top - rect.bottom),
+        rect.translated(0, blocked.bottom - rect.top),
+    ];
+    let horizontal = [
+        rect.translated(blocked.left - rect.right, 0),
+        rect.translated(blocked.right - rect.left, 0),
+    ];
+    let distance =
+        |moved: &PixelRect| (moved.left - rect.left).abs() + (moved.top - rect.top).abs();
+    let best = |candidates: [PixelRect; 2]| {
+        candidates
+            .into_iter()
+            .filter(|moved| work.encloses(moved))
+            .min_by_key(distance)
+    };
+    best(vertical).or_else(|| best(horizontal)).unwrap_or(rect)
 }
 
 /// One monitor, as the host reports it.
@@ -244,6 +321,61 @@ mod tests {
         let r = place(&settings, &monitor, BASE);
         assert_eq!((r.width(), r.height()), (1140, 384));
         assert_eq!((r.left, r.top), (-2560 + 30, -200 + 30));
+    }
+
+    #[test]
+    fn the_native_indicator_is_estimated_at_the_bottom_center() {
+        // The indicator measured on a 1280 × 800 screen with a 48-pixel
+        // taskbar: (523, 690) to (757, 752).
+        let monitor = MonitorArea {
+            bounds: PixelRect::from_origin_size(0, 0, 1280, 800),
+            work: PixelRect::from_origin_size(0, 0, 1280, 752),
+            scale: 1.0,
+            primary: true,
+        };
+        assert_eq!(
+            native_osd_estimate(&monitor),
+            PixelRect::from_origin_size(523, 690, 234, 62)
+        );
+        let scaled = native_osd_estimate(&MonitorArea {
+            scale: 1.5,
+            ..monitor
+        });
+        assert_eq!((scaled.width(), scaled.height()), (351, 93));
+        assert_eq!(scaled.bottom, 752);
+    }
+
+    #[test]
+    fn the_flyout_moves_out_of_the_way_of_an_obstacle() {
+        let work = PixelRect::from_origin_size(0, 0, 1280, 752);
+        let obstacle = PixelRect::from_origin_size(523, 690, 234, 62);
+        // Bottom center, overlapping: moved up above it, keeping its column.
+        let flyout = PixelRect::from_origin_size(450, 600, 380, 128);
+        let moved = avoid(flyout, obstacle, work, 10);
+        assert_eq!(moved, flyout.translated(0, 680 - 728));
+        assert!(!moved.intersects(&obstacle.expanded(10)));
+        // Far away: unchanged.
+        let corner = PixelRect::from_origin_size(876, 24, 380, 128);
+        assert_eq!(avoid(corner, obstacle, work, 10), corner);
+        // Just inside the gap: still moved.
+        let close = PixelRect::from_origin_size(450, 560, 380, 128);
+        assert_eq!(avoid(close, obstacle, work, 10).bottom, 680);
+    }
+
+    #[test]
+    fn avoiding_goes_sideways_when_up_and_down_do_not_fit() {
+        // A work area too short to put the flyout above or below.
+        let work = PixelRect::from_origin_size(0, 0, 1280, 200);
+        let obstacle = PixelRect::from_origin_size(500, 100, 200, 100);
+        let flyout = PixelRect::from_origin_size(450, 40, 200, 128);
+        let moved = avoid(flyout, obstacle, work, 10);
+        assert_eq!(moved.top, flyout.top);
+        assert_eq!(moved.right, 490);
+        // Nowhere to go: unchanged.
+        let tiny = PixelRect::from_origin_size(0, 0, 300, 200);
+        let flyout = PixelRect::from_origin_size(0, 40, 300, 128);
+        let obstacle = PixelRect::from_origin_size(0, 100, 300, 100);
+        assert_eq!(avoid(flyout, obstacle, tiny, 10), flyout);
     }
 
     #[test]

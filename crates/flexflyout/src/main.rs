@@ -142,6 +142,13 @@ fn init_logging(path: &std::path::Path) -> anyhow::Result<()> {
     let default_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
         log::error!("panic: {info}");
+        // Leave the system as it was: a hidden volume indicator would stay
+        // hidden after the process ends.
+        #[cfg(windows)]
+        {
+            platform::windows::native_osd::restore();
+            platform::windows::tray::remove();
+        }
         default_hook(info);
     }));
     Ok(())

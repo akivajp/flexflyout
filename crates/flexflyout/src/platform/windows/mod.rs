@@ -4,6 +4,7 @@
 pub mod keys;
 pub mod media;
 pub mod monitor;
+pub mod native_osd;
 pub mod tray;
 pub mod volume;
 pub mod window;

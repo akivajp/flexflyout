@@ -13,8 +13,8 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant};
 
 use eframe::egui;
-use flexflyout_core::config::Display;
-use flexflyout_core::layout::{self, PixelRect};
+use flexflyout_core::config::{Display, Monitor, NativeOsd};
+use flexflyout_core::layout::{self, MonitorArea, PixelRect};
 use flexflyout_core::{Config, FlyoutTimer, NowPlaying, Volume};
 use flexflyout_ui::{BASE_SIZE, FlyoutView, Labels};
 
@@ -23,7 +23,10 @@ use crate::platform::windows::keys::{self, Key};
 use crate::platform::windows::media::{self, Media};
 use crate::platform::windows::tray::{self, TrayCommand};
 use crate::platform::windows::window::{self, FlyoutWindow};
-use crate::platform::windows::{monitor, volume};
+use crate::platform::windows::{monitor, native_osd, volume};
+
+/// Distance kept from the Windows volume indicator, in pixels at 100%.
+const NATIVE_OSD_GAP: f32 = 12.0;
 
 /// How often to check whether the mouse pointer still rests on the shown
 /// flyout (which keeps it from fading out).
@@ -130,6 +133,7 @@ pub fn run(
         }),
     )
     .map_err(|err| anyhow::anyhow!("the window failed: {err}"));
+    native_osd::restore();
     tray::remove();
     result
 }
@@ -141,6 +145,8 @@ pub fn run(
 struct Placement {
     /// The placement settings.
     display: Display,
+    /// What to do with the Windows volume indicator.
+    native_osd: NativeOsd,
     /// Where the window was placed last.
     rect: Option<PixelRect>,
 }
@@ -150,9 +156,10 @@ struct Placement {
 struct SharedPlacement(Arc<Mutex<Placement>>);
 
 impl SharedPlacement {
-    fn new(display: Display) -> Self {
+    fn new(display: Display, native_osd: NativeOsd) -> Self {
         Self(Arc::new(Mutex::new(Placement {
             display,
+            native_osd,
             rect: None,
         })))
     }
@@ -168,12 +175,35 @@ impl SharedPlacement {
         let mut placement = self.lock();
         let monitors = monitor::list();
         let rect = layout::choose_monitor(&monitors, placement.display.monitor, monitor::cursor())
-            .map(|i| layout::place(&placement.display, &monitors[i], (BASE_SIZE.x, BASE_SIZE.y)));
+            .map(|i| {
+                let rect =
+                    layout::place(&placement.display, &monitors[i], (BASE_SIZE.x, BASE_SIZE.y));
+                match placement.native_osd {
+                    NativeOsd::Avoid => avoid_native_osd(rect, &monitors[i], &monitors),
+                    NativeOsd::Hide | NativeOsd::Keep => rect,
+                }
+            });
         if rect.is_none() {
             log::warn!("no monitor to show the flyout on");
         }
         placement.rect = rect;
         rect
+    }
+}
+
+/// Moves `rect` on `monitor` out of the way of the Windows volume indicator:
+/// where it was last seen, or else where it appears on the primary monitor.
+fn avoid_native_osd(rect: PixelRect, monitor: &MonitorArea, monitors: &[MonitorArea]) -> PixelRect {
+    let indicator = native_osd::last_seen().or_else(|| {
+        layout::choose_monitor(monitors, Monitor::Primary, None)
+            .map(|primary| layout::native_osd_estimate(&monitors[primary]))
+    });
+    match indicator {
+        Some(indicator) => {
+            let gap = (NATIVE_OSD_GAP * monitor.scale).round() as i32;
+            layout::avoid(rect, indicator, monitor.work, gap)
+        }
+        None => rect,
     }
 }
 
@@ -234,7 +264,8 @@ impl FlyoutApp {
         let (sender, messages) = channel();
         let ctx = cc.egui_ctx.clone();
         let raw = window.raw();
-        let placement = SharedPlacement::new(config.display.clone());
+        let placement = SharedPlacement::new(config.display.clone(), config.general.native_osd);
+        native_osd::start(config.general.native_osd);
         let show_via_egui = options.show_via_egui;
         let send = {
             let placement = placement.clone();
@@ -388,7 +419,9 @@ fn send(
     let show = match &message {
         Message::Show { .. } => true,
         Message::Settings { config, .. } => {
-            placement.lock().display = config.display.clone();
+            let mut placement = placement.lock();
+            placement.display = config.display.clone();
+            placement.native_osd = config.general.native_osd;
             true
         }
         Message::NowPlaying(_) | Message::Volume(_) | Message::Quit => false,
@@ -425,6 +458,9 @@ impl eframe::App for FlyoutApp {
                     }
                 }
                 Message::Settings { config, labels } => {
+                    if config.general.native_osd != self.config.general.native_osd {
+                        native_osd::set_mode(config.general.native_osd);
+                    }
                     self.timer.set_timing(config.timing.timing());
                     ctx.set_zoom_factor(config.display.scale);
                     self.config = *config;
