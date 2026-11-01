@@ -1,5 +1,9 @@
 # FlexFlyout
 
+<img src="crates/flexflyout/assets/flexflyout.svg" alt="FlexFlyout のアイコン" width="96" align="right">
+
+[![CI](https://github.com/akivajp/flexflyout/actions/workflows/ci.yml/badge.svg)](https://github.com/akivajp/flexflyout/actions/workflows/ci.yml) [![Release](https://img.shields.io/github/v/release/akivajp/flexflyout)](https://github.com/akivajp/flexflyout/releases/latest)
+
 [English](README.md)
 
 > **開発の初期段階です。** Windows 11 版から作っています。Linux のデスクトップは、その後に対応します。
@@ -25,11 +29,14 @@
 
 ## インストール（Windows 11）
 
-[Scoop](https://scoop.sh) で入れると、スタートメニューにも追加されます（`scoop update flexflyout` で更新できます。先にタスクトレイのアイコンから FlexFlyout を終了してください）。
+[Scoop](https://scoop.sh) で [akivajp のバケット](https://github.com/akivajp/scoop-bucket) から入れると、スタートメニューにも追加されます（`scoop update flexflyout` で更新できます。先にタスクトレイのアイコンから FlexFlyout を終了してください）。
 
 ```powershell
-scoop install https://raw.githubusercontent.com/akivajp/flexflyout/main/packaging/scoop/flexflyout.json
+scoop bucket add akivajp https://github.com/akivajp/scoop-bucket
+scoop install akivajp/flexflyout
 ```
+
+以前に定義ファイルの URL から入れた場合は、更新が届くように、バケットの README の手順でバケットに切り替えてください。
 
 または、[Releases](https://github.com/akivajp/flexflyout/releases) のページから `flexflyout-<版>-x86_64-pc-windows-msvc.zip` を取り、好きな場所に展開して `flexflyout.exe` を起動します（チェックサムは `SHA256SUMS`）。まだコード署名をしていないため、初回に Windows SmartScreen の警告が出ることがあります。**詳細情報** → **実行** を選んでください。
 

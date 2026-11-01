@@ -1,5 +1,9 @@
 # FlexFlyout
 
+<img src="crates/flexflyout/assets/flexflyout.svg" alt="FlexFlyout icon" width="96" align="right">
+
+[![CI](https://github.com/akivajp/flexflyout/actions/workflows/ci.yml/badge.svg)](https://github.com/akivajp/flexflyout/actions/workflows/ci.yml) [![Release](https://img.shields.io/github/v/release/akivajp/flexflyout)](https://github.com/akivajp/flexflyout/releases/latest)
+
 [日本語](README.ja.md)
 
 > **Early development.** Windows 11 comes first; the Linux desktops follow.
@@ -25,11 +29,14 @@ Screen sizes and monitor setups differ from desk to desk, so every part of the f
 
 ## Installation (Windows 11)
 
-With [Scoop](https://scoop.sh), which also adds FlexFlyout to the Start menu (`scoop update flexflyout` updates it; quit FlexFlyout from its tray icon first):
+With [Scoop](https://scoop.sh), from the [akivajp bucket](https://github.com/akivajp/scoop-bucket), which also adds FlexFlyout to the Start menu (`scoop update flexflyout` updates it; quit FlexFlyout from its tray icon first):
 
 ```powershell
-scoop install https://raw.githubusercontent.com/akivajp/flexflyout/main/packaging/scoop/flexflyout.json
+scoop bucket add akivajp https://github.com/akivajp/scoop-bucket
+scoop install akivajp/flexflyout
 ```
+
+If you installed it from the manifest URL before, switch to the bucket as its README explains, so that updates keep coming.
 
 Or download `flexflyout-<version>-x86_64-pc-windows-msvc.zip` from the [Releases](https://github.com/akivajp/flexflyout/releases) page, extract it anywhere and run `flexflyout.exe` (`SHA256SUMS` lists the checksum). The release is not code-signed yet, so Windows SmartScreen may warn the first time: choose **More info** → **Run anyway**.
 
