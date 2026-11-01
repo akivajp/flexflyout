@@ -1,0 +1,31 @@
+# yaml-language-server: $schema=https://aka.ms/winget-manifest.defaultLocale.1.12.0.schema.json
+
+PackageIdentifier: akivajp.FlexFlyout
+PackageVersion: 0.1.0
+PackageLocale: en-US
+Publisher: Akiva Miura
+PublisherUrl: https://github.com/akivajp
+PublisherSupportUrl: https://github.com/akivajp/flexflyout/issues
+Author: Akiva Miura
+PackageName: FlexFlyout
+PackageUrl: https://github.com/akivajp/flexflyout
+License: MIT OR Apache-2.0
+LicenseUrl: https://github.com/akivajp/flexflyout#license
+Copyright: Copyright (c) Akiva Miura
+ShortDescription: Media flyout for Windows 11 with cover art, playback controls and volume, sized and placed where you want.
+Description: |-
+  FlexFlyout pops up when the volume changes, a media key is pressed or a new track starts, with the cover art, title and artist, the position in the track, the playback controls (with shuffle and repeat) and the volume. It works with any player in the Windows media controls (Spotify, browsers, Media Player).
+  The size, the monitor, the position, the display time and the opacity are adjustable, the Windows volume indicator can be avoided or hidden, and the flyout can be pinned and dragged anywhere. Run `flexflyout` once; its tray icon can make it start with Windows.
+Moniker: flexflyout
+Tags:
+- flyout
+- media
+- media-controls
+- osd
+- volume
+ReleaseNotesUrl: https://github.com/akivajp/flexflyout/releases/tag/v0.1.0
+Documentations:
+- DocumentLabel: README
+  DocumentUrl: https://github.com/akivajp/flexflyout#readme
+ManifestType: defaultLocale
+ManifestVersion: 1.12.0

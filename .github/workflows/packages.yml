@@ -1,0 +1,55 @@
+name: Package checks
+
+# Installs the published release the way users do (Scoop from the akivajp
+# bucket, and winget from the manifest in this commit) and runs it. Run by
+# hand, e.g. after a release.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  scoop:
+    name: Scoop (akivajp bucket)
+    runs-on: windows-latest
+    steps:
+      - name: Install Scoop
+        shell: pwsh
+        run: |
+          iex "& {$(irm get.scoop.sh)} -RunAsAdmin"
+          Join-Path (Resolve-Path ~).Path "scoop\shims" >> $env:GITHUB_PATH
+      - name: Install FlexFlyout from the bucket, as in the README
+        shell: pwsh
+        run: |
+          scoop bucket add akivajp https://github.com/akivajp/scoop-bucket
+          scoop install akivajp/flexflyout
+      - name: Check it
+        shell: pwsh
+        run: |
+          # A GUI program: wait for it to print its version.
+          $exe = Join-Path (scoop prefix flexflyout) "flexflyout.exe"
+          Start-Process $exe -ArgumentList "--version" -Wait -NoNewWindow -RedirectStandardOutput version.txt
+          Get-Content version.txt
+          if (-not (Get-Content version.txt)) { throw "no version" }
+          Get-ChildItem "$env:APPDATA\Microsoft\Windows\Start Menu\Programs\Scoop Apps" -Filter "FlexFlyout*"
+
+  winget:
+    name: winget (manifest of this commit)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Validate and install the manifest
+        shell: pwsh
+        run: |
+          winget --version
+          # Installing from a local manifest is off by default.
+          winget settings --enable LocalManifestFiles
+          winget validate --manifest packaging/winget
+          winget install --manifest packaging/winget --accept-package-agreements --accept-source-agreements --disable-interactivity
+          if ($LASTEXITCODE -ne 0) { throw "winget install failed: $LASTEXITCODE" }
+          # Portable commands are linked here (on the PATH of new shells).
+          $exe = "$env:LOCALAPPDATA\Microsoft\WinGet\Links\flexflyout.exe"
+          Start-Process $exe -ArgumentList "--version" -Wait -NoNewWindow -RedirectStandardOutput version.txt
+          Get-Content version.txt
+          if (-not (Get-Content version.txt)) { throw "no version" }
