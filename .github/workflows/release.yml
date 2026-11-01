@@ -1,10 +1,11 @@
 name: Release
 
-# Pushing a tag such as v0.1.0 builds the Windows binary and publishes a
-# GitHub Release with notes from CHANGELOG.md, the zip and its checksum.
+# Pushing a tag such as v0.1.0 builds the Windows and Linux binaries and
+# publishes a GitHub Release with notes from CHANGELOG.md, the archives
+# and their checksums.
 #
-# Running the workflow by hand only builds the zip (uploaded as an
-# artifact), to check the packaging.
+# Running the workflow by hand only builds the archives (uploaded as
+# artifacts), to check the packaging.
 on:
   push:
     tags: ["v*"]
@@ -50,9 +51,40 @@ jobs:
           path: dist/*
           retention-days: 30
 
+  build-linux:
+    name: Build (x86_64-unknown-linux-gnu)
+    # The oldest supported Ubuntu, so that the binary runs on glibc 2.35+.
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Build
+        run: cargo build --release --locked -p flexflyout
+      - name: Package
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            version="$GITHUB_REF_NAME"
+          else
+            version="dev-${GITHUB_SHA::7}"
+          fi
+          name="flexflyout-${version}-x86_64-unknown-linux-gnu"
+          mkdir -p "dist/$name"
+          cp target/release/flexflyout "dist/$name/"
+          cp packaging/linux/flexflyout.desktop crates/flexflyout/assets/flexflyout.png crates/flexflyout/assets/flexflyout.svg "dist/$name/"
+          cp README.md README.ja.md CHANGELOG.md LICENSE-MIT LICENSE-APACHE "dist/$name/"
+          tar -C dist -czf "dist/$name.tar.gz" "$name"
+          rm -rf "dist/$name"
+          ls -l dist
+      - uses: actions/upload-artifact@v7
+        with:
+          name: flexflyout-x86_64-unknown-linux-gnu
+          path: dist/*
+          retention-days: 30
+
   release:
     name: Publish release
-    needs: build
+    needs: [build, build-linux]
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:

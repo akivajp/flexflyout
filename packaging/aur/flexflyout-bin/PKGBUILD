@@ -1,0 +1,29 @@
+# Maintainer: Akiva Miura <akiva.miura@gmail.com>
+# The release binary of FlexFlyout for Arch Linux and derivatives (CachyOS,
+# EndeavourOS, Manjaro). Build and install with: makepkg -si
+pkgname=flexflyout-bin
+pkgver=0.2.0
+pkgrel=1
+pkgdesc="Media flyout for KDE Plasma (Wayland): cover art, playback controls and volume, sized and placed where you want"
+arch=('x86_64')
+url="https://github.com/akivajp/flexflyout"
+license=('MIT OR Apache-2.0')
+depends=('glibc' 'gcc-libs' 'wayland' 'libxkbcommon' 'vulkan-icd-loader' 'fontconfig' 'xdg-utils')
+optdepends=('pipewire-pulse: the volume with PipeWire (PulseAudio works as is)'
+            'mesa: OpenGL or Vulkan drawing on Intel and AMD graphics')
+provides=('flexflyout')
+conflicts=('flexflyout')
+_archive="flexflyout-v${pkgver}-x86_64-unknown-linux-gnu"
+source=("https://github.com/akivajp/flexflyout/releases/download/v${pkgver}/${_archive}.tar.gz")
+sha256sums=('SKIP')
+
+package() {
+    cd "${_archive}"
+    install -Dm755 flexflyout "${pkgdir}/usr/bin/flexflyout"
+    install -Dm644 flexflyout.desktop "${pkgdir}/usr/share/applications/flexflyout.desktop"
+    install -Dm644 flexflyout.png "${pkgdir}/usr/share/icons/hicolor/256x256/apps/flexflyout.png"
+    install -Dm644 flexflyout.svg "${pkgdir}/usr/share/icons/hicolor/scalable/apps/flexflyout.svg"
+    install -Dm644 LICENSE-MIT "${pkgdir}/usr/share/licenses/${pkgname}/LICENSE-MIT"
+    install -Dm644 LICENSE-APACHE "${pkgdir}/usr/share/licenses/${pkgname}/LICENSE-APACHE"
+    install -Dm644 README.md "${pkgdir}/usr/share/doc/${pkgname}/README.md"
+}

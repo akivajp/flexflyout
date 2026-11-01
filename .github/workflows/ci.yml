@@ -35,6 +35,23 @@ jobs:
       - name: Tests
         run: cargo test --workspace
 
+  linux-binary:
+    name: Linux binary
+    needs: test
+    # The oldest supported Ubuntu, so that the binary runs on glibc 2.35+.
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Build the release binary
+        run: cargo build --release -p flexflyout
+      - uses: actions/upload-artifact@v7
+        with:
+          name: flexflyout-linux-x86_64
+          path: target/release/flexflyout
+          retention-days: 30
+
   windows-binary:
     name: Windows binary
     needs: test

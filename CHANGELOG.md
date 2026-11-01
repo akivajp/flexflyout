@@ -8,6 +8,18 @@ include breaking changes).
 ## [Unreleased]
 
 ### Added
+- Linux: FlexFlyout runs on Wayland desktops with layer-shell — KDE
+  Plasma, sway, Hyprland and other wlroots ones (not GNOME, not X11). It
+  follows MPRIS players and the PipeWire or PulseAudio volume, with the
+  same flyout, controls, pinning and dragging, tray menu (StatusNotifier-
+  Item), settings window and "Start at login" (an XDG autostart entry).
+  Cover art comes from files, data: URLs, or the web address a player
+  gives (Spotify) — the only network access.
+- Linux release archive (`x86_64-unknown-linux-gnu`, glibc 2.35 or newer)
+  with a desktop entry and the icon, and a PKGBUILD for Arch Linux and
+  derivatives.
+
+### Added
 - The settings window shows the version, with links to the website and to
   supporting the development.
 

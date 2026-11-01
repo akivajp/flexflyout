@@ -6,7 +6,7 @@
 
 [日本語](README.ja.md)
 
-> **Early development.** Windows 11 comes first; the Linux desktops follow.
+> **Early development.** Windows 11 and KDE Plasma (Wayland) work; GNOME follows.
 
 A flexible, cross-platform media flyout. When you change the volume or a new track starts, it pops up with what is playing — cover art, title and artist — along with the position in the track, playback controls (including shuffle and repeat) and the volume, then fades away. Click or drag the bars to seek or set the volume. Pin the flyout to keep it on screen — and drag it wherever you like, optionally as its new usual place — or close it at once.
 
@@ -16,14 +16,14 @@ Screen sizes and monitor setups differ from desk to desk, so every part of the f
 - **Position** — nine anchor points plus pixel offsets
 - **Monitor** — the primary one, the one under the cursor, or a specific one
 - **Display time** and **opacity**
-- **The system's own volume indicator** — keep it and place the flyout beside it, or hide it
+- **The system's own volume indicator** (Windows) — keep it and place the flyout beside it, or hide it
 
 ## Platforms
 
 | Platform | Status |
 |---|---|
 | Windows 11 | Available (x86_64) |
-| Linux — KDE Plasma (Wayland) | Planned |
+| Linux — KDE Plasma (Wayland) | Available (x86_64); also sway, Hyprland and other compositors with layer-shell |
 | Linux — GNOME (Wayland) | Planned, as a small GNOME Shell extension that draws what FlexFlyout sends |
 | macOS | Future |
 
@@ -50,6 +50,23 @@ FlexFlyout runs in the notification area (the tray). Its menu shows the flyout, 
 
 If you hid the Windows volume indicator, it comes back when FlexFlyout quits.
 
+## Installation (Linux)
+
+FlexFlyout runs on Wayland desktops whose compositor offers layer-shell — KDE Plasma, sway, Hyprland and other wlroots ones (not GNOME, and not X11). It follows any player with MPRIS (Spotify, browsers, VLC, mpv with mpv-mpris, Elisa…) and the volume through PipeWire or PulseAudio; the volume keys work through the volume change they cause.
+
+On Arch Linux and derivatives (CachyOS, EndeavourOS, Manjaro), [`packaging/aur/flexflyout-bin/PKGBUILD`](packaging/aur/flexflyout-bin/PKGBUILD) installs the release binary with a menu entry:
+
+```sh
+git clone https://github.com/akivajp/flexflyout.git
+cd flexflyout/packaging/aur/flexflyout-bin && makepkg -si
+```
+
+Elsewhere (glibc 2.35 or newer), download `flexflyout-<version>-x86_64-unknown-linux-gnu.tar.gz` from the [Releases](https://github.com/akivajp/flexflyout/releases) page and put `flexflyout` on your `PATH`; `flexflyout.desktop` and `flexflyout.png` go to `~/.local/share/applications` and `~/.local/share/icons/hicolor/256x256/apps` for a menu entry.
+
+Start it from the menu or with `flexflyout`. The tray icon (on KDE Plasma) has the same menu as on Windows, with **Start at login** instead. The settings are in `~/.config/flexflyout/config.toml` and the log in `~/.local/state/flexflyout/`. KDE Plasma's own volume popup stays; it can be turned off in Plasma's audio settings.
+
+To remove it: turn **Start at login** off (or delete `~/.config/autostart/flexflyout.desktop`), uninstall the package (`sudo pacman -R flexflyout-bin`) or delete the files, and delete `~/.config/flexflyout` and `~/.local/state/flexflyout` if you like.
+
 ## How it works
 
 - **Now playing and playback controls**: the System Media Transport Controls (SMTC) on Windows, MPRIS on Linux
@@ -70,7 +87,9 @@ Code signing of the Windows releases through the [SignPath Foundation](https://s
 
 ### Privacy
 
-FlexFlyout collects no telemetry and makes no network connections. It reads what the media players report to Windows (the track, its cover art and position) and the volume, and watches the volume and media keys only to know when to show the flyout (no other key is recorded or kept). Its settings and its log stay on your machine.
+FlexFlyout collects no telemetry. It reads what the media players report to the system (the track, its cover art and position) and the volume, and on Windows watches the volume and media keys only to know when to show the flyout (no other key is recorded or kept). Its settings and its log stay on your machine.
+
+The only network access: on Linux, when a player gives its cover art as a web address (Spotify does), FlexFlyout downloads that image from that address. On Windows it makes no network connections.
 
 ## License
 

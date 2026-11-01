@@ -66,7 +66,8 @@ struct Cli {
     settings: bool,
 
     /// Where to write the log (default: flexflyout.log, or settings.log
-    /// with --settings, in %LOCALAPPDATA%\flexflyout on Windows).
+    /// with --settings, in %LOCALAPPDATA%\flexflyout on Windows and in
+    /// ~/.local/state/flexflyout on Linux).
     #[arg(long, value_name = "PATH")]
     log_file: Option<PathBuf>,
 
@@ -151,9 +152,15 @@ fn run(cli: Cli) -> anyhow::Result<()> {
 }
 
 /// Default folder of the logs: next to the other per-user data of the app.
+/// `%LOCALAPPDATA%` on Windows, `$XDG_STATE_HOME` (or `~/.local/state`)
+/// elsewhere.
 fn default_log_dir() -> PathBuf {
     let base = std::env::var_os("LOCALAPPDATA")
+        .or_else(|| std::env::var_os("XDG_STATE_HOME").filter(|dir| !dir.is_empty()))
         .map(PathBuf::from)
+        .or_else(|| {
+            std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".local").join("state"))
+        })
         .unwrap_or_else(std::env::temp_dir);
     base.join("flexflyout")
 }

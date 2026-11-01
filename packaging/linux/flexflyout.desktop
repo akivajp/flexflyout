@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Application
+Name=FlexFlyout
+GenericName=Media flyout
+GenericName[ja]=メディアの Flyout
+Comment=Cover art, playback controls and volume when the volume or the track changes
+Comment[ja]=音量や曲が変わったときに、ジャケット・再生の操作・音量を表示します
+Exec=flexflyout
+Icon=flexflyout
+Terminal=false
+Categories=AudioVideo;Audio;Utility;
+Keywords=media;volume;osd;mpris;flyout;
+StartupNotify=false

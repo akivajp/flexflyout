@@ -6,7 +6,7 @@
 
 [English](README.md)
 
-> **開発の初期段階です。** Windows 11 版から作っています。Linux のデスクトップは、その後に対応します。
+> **開発の初期段階です。** Windows 11 と KDE Plasma（Wayland）で動きます。GNOME はこの後に対応します。
 
 柔軟に調整できる、クロスプラットフォームのメディアの Flyout です。音量を変えたときや新しい曲が始まったときに、再生中の曲の情報（ジャケット・曲名・アーティスト）を、再生位置、再生の操作ボタン（シャッフル・リピートを含む）、音量と一緒に表示し、しばらくすると消えます。バーをクリック・ドラッグすると再生位置や音量を変えられます。ピン留めすると表示したままになり、好きな位置へドラッグで動かせます（その位置を次からの表示位置にすることもできます）。すぐに閉じるボタンもあります。
 
@@ -16,14 +16,14 @@
 - **位置**: 9か所の基準点と、ピクセル単位のずらし幅
 - **表示先のモニター**: メインのモニター、カーソルのある画面、番号で指定した画面
 - **表示時間**と**不透明度**
-- **OS 標準の音量表示**: 残して、その横に並べて表示するか、消すか
+- **OS 標準の音量表示**（Windows）: 残して、その横に並べて表示するか、消すか
 
 ## 対応する環境
 
 | 環境 | 状況 |
 |---|---|
 | Windows 11 | 公開中（x86_64） |
-| Linux — KDE Plasma（Wayland） | 予定 |
+| Linux — KDE Plasma（Wayland） | 公開中（x86_64）。sway・Hyprland など、layer-shell に対応するほかの環境でも動く |
 | Linux — GNOME（Wayland） | 予定。FlexFlyout から送った内容を描くだけの、小さな GNOME Shell 拡張として作る |
 | macOS | 将来 |
 
@@ -50,6 +50,23 @@ FlexFlyout は通知領域（タスクトレイ）で動きます。メニュー
 
 Windows 標準の音量表示を消す設定にしていた場合も、FlexFlyout を終了すれば元に戻ります。
 
+## インストール（Linux）
+
+layer-shell に対応した Wayland のデスクトップで動きます。KDE Plasma・sway・Hyprland など wlroots 系が対象で、GNOME と X11 では動きません。MPRIS に対応したプレーヤー（Spotify・ブラウザー・VLC・mpv-mpris を入れた mpv・Elisa など）と、PipeWire または PulseAudio の音量に合わせて表示します。音量キーは、キーで音量が変わることで表示のきっかけになります。
+
+Arch Linux とその派生（CachyOS・EndeavourOS・Manjaro）では、[`packaging/aur/flexflyout-bin/PKGBUILD`](packaging/aur/flexflyout-bin/PKGBUILD) でリリースのバイナリーをメニュー項目付きで入れられます。
+
+```sh
+git clone https://github.com/akivajp/flexflyout.git
+cd flexflyout/packaging/aur/flexflyout-bin && makepkg -si
+```
+
+ほかのディストリビューション（glibc 2.35 以降）では、[Releases](https://github.com/akivajp/flexflyout/releases) のページから `flexflyout-<版>-x86_64-unknown-linux-gnu.tar.gz` を取り、`flexflyout` を `PATH` の通った場所に置きます。メニュー項目が要る場合は、`flexflyout.desktop` を `~/.local/share/applications` に、`flexflyout.png` を `~/.local/share/icons/hicolor/256x256/apps` に置いてください。
+
+メニューか `flexflyout` で起動します。タスクトレイのアイコン（KDE Plasma）のメニューは Windows と同じで、自動起動は **ログイン時に開始** です。設定は `~/.config/flexflyout/config.toml`、ログは `~/.local/state/flexflyout/` にあります。KDE Plasma 自身の音量表示は残ります。消したい場合は Plasma の音声の設定で切ってください。
+
+消すときは、**ログイン時に開始** を外し（または `~/.config/autostart/flexflyout.desktop` を消し）、パッケージを外す（`sudo pacman -R flexflyout-bin`）かファイルを消します。必要なら `~/.config/flexflyout` と `~/.local/state/flexflyout` も消してください。
+
 ## 仕組み
 
 - **再生中の曲の情報と操作**: Windows は System Media Transport Controls（SMTC）、Linux は MPRIS
@@ -70,7 +87,9 @@ Windows 版のリリースは、[SignPath Foundation](https://signpath.org) に�
 
 ### プライバシー
 
-FlexFlyout は利用状況を送信せず、ネットワークに一切接続しません。メディアプレーヤーが Windows に知らせる情報（曲、ジャケット、再生位置）と音量を読み、Flyout を出すきっかけとして音量キーとメディアキーを見るだけです（ほかのキーは記録も保存もしません）。設定とログは手元の PC にだけ置かれます。
+FlexFlyout は利用状況を送信しません。メディアプレーヤーがシステムに知らせる情報（曲、ジャケット、再生位置）と音量を読み、Windows では Flyout を出すきっかけとして音量キーとメディアキーを見るだけです（ほかのキーは記録も保存もしません）。設定とログは手元の PC にだけ置かれます。
+
+ネットワークへの接続は1つだけです。Linux で、プレーヤーがジャケットを Web のアドレスで渡した場合（Spotify など）、そのアドレスから画像を取得します。Windows ではネットワークに一切接続しません。
 
 ## ライセンス
 
