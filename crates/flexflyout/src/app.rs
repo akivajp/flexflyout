@@ -2,22 +2,23 @@
 //! hides itself following [`FlyoutTimer`].
 //!
 //! Sources (for now the demo and the settings file) run on their own
-//! threads. They send a [`Message`], show the window through Win32 at once
-//! when there is something to show, and ask egui for a repaint; the app then
-//! picks the message up in [`eframe::App::logic`].
+//! threads. They send a [`Message`], place and show the window through Win32
+//! at once when there is something to show, and ask egui for a repaint; the
+//! app then picks the message up in [`eframe::App::logic`].
 
 use std::path::PathBuf;
 use std::sync::mpsc::{Receiver, Sender, channel};
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Instant;
 
 use eframe::egui;
+use flexflyout_core::config::Display;
+use flexflyout_core::layout::{self, PixelRect};
 use flexflyout_core::{Config, FlyoutTimer, NowPlaying, Volume};
 use flexflyout_ui::{BASE_SIZE, FlyoutView, Labels};
 
+use crate::platform::windows::monitor;
 use crate::platform::windows::window::{self, FlyoutWindow};
-
-/// Distance of the window from the corner of the screen, in pixels.
-const MARGIN: i32 = 24;
 
 /// What the sources send to the window.
 #[derive(Debug)]
@@ -31,7 +32,8 @@ pub enum Message {
         /// When the message was sent, to log how long showing took.
         sent: Instant,
     },
-    /// Use new settings (the file was saved).
+    /// Use new settings (the file was saved). The flyout is shown with
+    /// them, so that a change of the placement or the look can be seen.
     Settings {
         /// The settings read from the file.
         config: Box<Config>,
@@ -86,6 +88,49 @@ pub fn run(labels: Labels, config: Config, options: Options) -> anyhow::Result<(
     .map_err(|err| anyhow::anyhow!("the window failed: {err}"))
 }
 
+/// Where the flyout goes, shared by the sources' threads (which place the
+/// window when they show it) and the UI thread (which puts it back when
+/// something else moved it).
+#[derive(Debug)]
+struct Placement {
+    /// The placement settings.
+    display: Display,
+    /// Where the window was placed last.
+    rect: Option<PixelRect>,
+}
+
+/// [`Placement`] behind a lock.
+#[derive(Clone, Debug)]
+struct SharedPlacement(Arc<Mutex<Placement>>);
+
+impl SharedPlacement {
+    fn new(display: Display) -> Self {
+        Self(Arc::new(Mutex::new(Placement {
+            display,
+            rect: None,
+        })))
+    }
+
+    fn lock(&self) -> MutexGuard<'_, Placement> {
+        // The data stays consistent even if a thread panicked holding it.
+        self.0.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// Chooses the monitor and the rectangle for the next appearance (the
+    /// monitor under the pointer can change every time), and remembers it.
+    fn next_rect(&self) -> Option<PixelRect> {
+        let mut placement = self.lock();
+        let monitors = monitor::list();
+        let rect = layout::choose_monitor(&monitors, placement.display.monitor, monitor::cursor())
+            .map(|i| layout::place(&placement.display, &monitors[i], (BASE_SIZE.x, BASE_SIZE.y)));
+        if rect.is_none() {
+            log::warn!("no monitor to show the flyout on");
+        }
+        placement.rect = rect;
+        rect
+    }
+}
+
 /// State of the flyout window.
 struct FlyoutApp {
     labels: Labels,
@@ -95,6 +140,7 @@ struct FlyoutApp {
     timer: FlyoutTimer,
     messages: Receiver<Message>,
     window: FlyoutWindow,
+    placement: SharedPlacement,
     show_via_egui: bool,
     /// When the message that is being shown was sent, until the first frame
     /// with it has been drawn (then the delay is logged).
@@ -123,15 +169,28 @@ impl FlyoutApp {
         let window = FlyoutWindow::new(cc)?;
         // Also applies the shadow change above (SWP_FRAMECHANGED).
         window.apply_flyout_style()?;
-        window.move_to_top_right(MARGIN)?;
         let fonts = setup_fonts(&cc.egui_ctx);
         log::info!("fonts: {fonts:?}");
+        // The panel is drawn in points at scale 1.0; the zoom factor makes
+        // it larger or smaller, and the window is sized to match on every
+        // appearance. The flyout never has the focus, but a zoom shortcut
+        // must not change the size behind the settings' back either.
+        cc.egui_ctx.set_zoom_factor(config.display.scale);
+        cc.egui_ctx
+            .options_mut(|options| options.zoom_with_keyboard = false);
+        for (i, monitor) in monitor::list().iter().enumerate() {
+            log::info!("monitor {}: {monitor:?}", i + 1);
+        }
 
         let (sender, messages) = channel();
         let ctx = cc.egui_ctx.clone();
         let raw = window.raw();
+        let placement = SharedPlacement::new(config.display.clone());
         let show_via_egui = options.show_via_egui;
-        let send = move |message: Message| send(&sender, &ctx, raw, message, show_via_egui);
+        let send = {
+            let placement = placement.clone();
+            move |message: Message| send(&sender, &ctx, raw, &placement, message, show_via_egui)
+        };
         watch_settings(&options, &config, send.clone());
         crate::demo::spawn(options.demo_cycles, send);
 
@@ -143,10 +202,37 @@ impl FlyoutApp {
             volume: None,
             messages,
             window,
+            placement,
             show_via_egui: options.show_via_egui,
             pending_since: None,
             cleared: false,
         })
+    }
+}
+
+impl FlyoutApp {
+    /// Puts a shown window back where it was placed. Moving the window to a
+    /// monitor with another display scaling makes Windows and winit resize
+    /// it for the new scaling, and they may move it as well; the rectangle
+    /// was already computed for that monitor, so placing it again settles.
+    fn keep_in_place(&self) {
+        if !self.window.is_visible() {
+            return;
+        }
+        let Some(wanted) = self.placement.lock().rect else {
+            return;
+        };
+        let Some(actual) = self.window.rect() else {
+            return;
+        };
+        if actual != wanted {
+            // A position that differs only because the asynchronous move is
+            // still on its way is not worth a line; a different size is.
+            if (actual.width(), actual.height()) != (wanted.width(), wanted.height()) {
+                log::info!("the window was resized to {actual:?}; putting it back to {wanted:?}");
+            }
+            self.window.set_rect(wanted);
+        }
     }
 }
 
@@ -182,20 +268,31 @@ fn watch_settings(options: &Options, config: &Config, send: impl Fn(Message) + S
 /// Hands a message to the window from a source's thread.
 ///
 /// The message goes first, so that the window has it by the time it is
-/// shown and painted; then the window is shown and egui is woken up.
+/// shown and painted; then the window is placed and shown, and egui is
+/// woken up.
 fn send(
     sender: &Sender<Message>,
     ctx: &egui::Context,
     raw: isize,
+    placement: &SharedPlacement,
     message: Message,
     show_via_egui: bool,
 ) {
-    let show = matches!(message, Message::Show { .. });
+    let show = match &message {
+        Message::Show { .. } => true,
+        Message::Settings { config, .. } => {
+            placement.lock().display = config.display.clone();
+            true
+        }
+        Message::Quit => false,
+    };
     if sender.send(message).is_err() {
         return; // The window is closing.
     }
-    if show && !show_via_egui {
-        window::show_from_any_thread(raw);
+    if show && let Some(rect) = placement.next_rect() {
+        // With --show-via-egui, egui shows the window once it has the
+        // message; it is only moved here.
+        window::place_from_any_thread(raw, rect, !show_via_egui);
     }
     ctx.request_repaint();
 }
@@ -226,9 +323,16 @@ impl eframe::App for FlyoutApp {
                 }
                 Message::Settings { config, labels } => {
                     self.timer.set_timing(config.timing.timing());
+                    ctx.set_zoom_factor(config.display.scale);
                     self.config = *config;
                     if let Some(labels) = labels {
                         self.labels = labels;
+                    }
+                    // Show the flyout with the new settings.
+                    self.timer.trigger(now);
+                    self.cleared = false;
+                    if self.show_via_egui {
+                        ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
                     }
                 }
                 Message::Quit => {
@@ -237,6 +341,8 @@ impl eframe::App for FlyoutApp {
                 }
             }
         }
+
+        self.keep_in_place();
 
         match self.timer.next_change(now) {
             // Fading: every frame. Fully shown: when the fade-out starts.

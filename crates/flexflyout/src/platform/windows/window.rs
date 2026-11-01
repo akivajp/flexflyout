@@ -3,22 +3,24 @@
 //!
 //! Showing goes through Win32 directly, not through egui's viewport command:
 //! eframe repaints hidden windows at most every 100 ms, so a `Visible(true)`
-//! sent from another thread could wait that long. [`show_from_any_thread`]
-//! makes the window visible at once, and eframe then paints it as usual.
+//! sent from another thread could wait that long. [`place_from_any_thread`]
+//! moves the window and makes it visible at once, and eframe then paints it
+//! as usual.
 
 use std::ffi::c_void;
 
 use anyhow::Context as _;
+use flexflyout_core::layout::PixelRect;
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use windows::Win32::Foundation::{HWND, RECT};
 use windows::Win32::Graphics::Dwm::{DWMWA_BORDER_COLOR, DWMWA_COLOR_NONE, DwmSetWindowAttribute};
 use windows::Win32::Graphics::Gdi::{BLACK_BRUSH, GetStockObject};
 use windows::Win32::UI::WindowsAndMessaging::{
     GCLP_HBRBACKGROUND, GWL_EXSTYLE, GetForegroundWindow, GetWindowLongPtrW, GetWindowRect,
-    GetWindowTextW, HWND_TOPMOST, IsWindowVisible, SPI_GETWORKAREA, SW_HIDE, SWP_ASYNCWINDOWPOS,
-    SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SWP_SHOWWINDOW,
-    SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS, SetClassLongPtrW, SetWindowLongPtrW, SetWindowPos,
-    ShowWindow, SystemParametersInfoW, WS_EX_APPWINDOW, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
+    GetWindowTextW, HWND_TOPMOST, IsWindowVisible, SET_WINDOW_POS_FLAGS, SW_HIDE,
+    SWP_ASYNCWINDOWPOS, SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER,
+    SWP_SHOWWINDOW, SetClassLongPtrW, SetWindowLongPtrW, SetWindowPos, ShowWindow, WS_EX_APPWINDOW,
+    WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
 };
 
 /// The flyout's window, used from the UI thread.
@@ -86,37 +88,18 @@ impl FlyoutWindow {
         Ok(())
     }
 
-    /// Moves the window to the top-right corner of the primary monitor's
-    /// work area (the screen without the taskbar), `margin` pixels inside.
-    ///
-    /// A stand-in until the placement settings (monitor, nine anchors,
-    /// offsets) arrive.
-    pub fn move_to_top_right(&self, margin: i32) -> anyhow::Result<()> {
-        let mut work = RECT::default();
-        let mut window = RECT::default();
-        // SAFETY: both pointers are to live RECTs of the right size.
-        unsafe {
-            SystemParametersInfoW(
-                SPI_GETWORKAREA,
-                0,
-                Some((&raw mut work).cast()),
-                SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS(0),
-            )
-            .context("cannot read the work area")?;
-            GetWindowRect(self.0, &mut window).context("cannot read the window size")?;
-            let width = window.right - window.left;
-            SetWindowPos(
-                self.0,
-                None,
-                work.right - margin - width,
-                work.top + margin,
-                0,
-                0,
-                SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE,
-            )
-            .context("cannot move the window")?;
-        }
-        Ok(())
+    /// The window's rectangle on the screen.
+    pub fn rect(&self) -> Option<PixelRect> {
+        let mut rect = RECT::default();
+        // SAFETY: a plain query into a live RECT.
+        unsafe { GetWindowRect(self.0, &mut rect) }
+            .ok()
+            .map(|()| super::monitor::pixel_rect(rect))
+    }
+
+    /// Moves and resizes the window from its own thread, waiting until done.
+    pub fn set_rect(&self, rect: PixelRect) {
+        set_window_pos(self.0, rect, SWP_NOZORDER | SWP_NOACTIVATE);
     }
 
     /// Whether the window is shown.
@@ -133,28 +116,44 @@ impl FlyoutWindow {
     }
 }
 
-/// Shows the window without activating it and puts it above the other
-/// always-on-top windows. Safe to call from any thread: the request is
-/// posted to the window's thread instead of waiting for it.
-pub fn show_from_any_thread(raw: isize) {
+/// Moves and resizes the window, puts it above the other always-on-top
+/// windows and, if `show`, shows it, all without activating it. Safe to call
+/// from any thread: the request is posted to the window's thread instead of
+/// waiting for it.
+pub fn place_from_any_thread(raw: isize, rect: PixelRect, show: bool) {
     if raw == 0 {
         return; // The window does not exist yet.
     }
-    // SAFETY: the window belongs to this process and lives until it exits;
+    let show = if show {
+        SWP_SHOWWINDOW
+    } else {
+        SET_WINDOW_POS_FLAGS(0)
+    };
     // SWP_ASYNCWINDOWPOS keeps a busy UI thread from blocking the caller.
+    set_window_pos(
+        HWND(raw as *mut c_void),
+        rect,
+        SWP_NOACTIVATE | SWP_ASYNCWINDOWPOS | show,
+    );
+}
+
+/// `SetWindowPos` to `rect`, topmost unless `flags` has SWP_NOZORDER;
+/// failures are logged.
+fn set_window_pos(hwnd: HWND, rect: PixelRect, flags: SET_WINDOW_POS_FLAGS) {
+    // SAFETY: the window belongs to this process and lives until it exits.
     let result = unsafe {
         SetWindowPos(
-            HWND(raw as *mut c_void),
+            hwnd,
             Some(HWND_TOPMOST),
-            0,
-            0,
-            0,
-            0,
-            SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW | SWP_ASYNCWINDOWPOS,
+            rect.left,
+            rect.top,
+            rect.width(),
+            rect.height(),
+            flags,
         )
     };
     if let Err(err) = result {
-        log::warn!("cannot show the window: {err}");
+        log::warn!("cannot place the window at {rect:?}: {err}");
     }
 }
 

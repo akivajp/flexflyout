@@ -5,6 +5,7 @@
 //! the same timing rules, and so that they can be tested anywhere.
 
 pub mod config;
+pub mod layout;
 mod timer;
 
 pub use config::Config;
