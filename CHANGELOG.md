@@ -7,6 +7,8 @@ include breaking changes).
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-11-02
+
 ### Added
 - Linux: FlexFlyout runs on Wayland desktops with layer-shell — KDE
   Plasma, sway, Hyprland and other wlroots ones (not GNOME, not X11). It
@@ -18,17 +20,16 @@ include breaking changes).
 - Linux release archive (`x86_64-unknown-linux-gnu`, glibc 2.35 or newer)
   with a desktop entry and the icon, and a PKGBUILD for Arch Linux and
   derivatives.
-
-### Added
 - The settings window shows the version, with links to the website and to
   supporting the development.
 
 ### Changed
 - The playback buttons are grayed out while no player is there.
 - egui's bundled fonts are no longer built in (their licence is not an OSI
-  one); the flyout uses the Windows fonts (Segoe UI and Yu Gothic, or
-  Arial and Meiryo where they are missing), as before. The executable is
-  about 0.8 MB smaller.
+  one): on Windows the flyout uses the Windows fonts (Segoe UI and Yu
+  Gothic, or Arial and Meiryo where they are missing), as before, and on
+  Linux the desktop's (through fontconfig). The executable is about
+  0.8 MB smaller.
 
 ## [0.2.0] - 2026-11-02
 
@@ -65,6 +66,7 @@ The first release, for Windows 11.
 - English and Japanese.
 - `flexflyout --demo` shows sample tracks.
 
-[Unreleased]: https://github.com/akivajp/flexflyout/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/akivajp/flexflyout/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/akivajp/flexflyout/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/akivajp/flexflyout/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/akivajp/flexflyout/releases/tag/v0.1.0
