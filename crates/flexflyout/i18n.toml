@@ -1,0 +1,6 @@
+# Translations of the GUI (Fluent). English is the fallback and the source
+# of the message IDs: the fl! macro checks every ID against it at build time.
+fallback_language = "en"
+
+[fluent]
+assets_dir = "i18n"

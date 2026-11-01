@@ -2,7 +2,7 @@
 
 [日本語](README.ja.md)
 
-> **Early development.** Nothing is usable yet. This repository holds the plan for now, and the Windows version comes first.
+> **Early development.** Nothing is usable yet. The Windows version comes first; so far it only has a demo mode (`flexflyout --demo`) that shows sample tracks.
 
 A flexible, cross-platform media flyout. When you change the volume or a new track starts, it pops up with what is playing — cover art, title and artist — along with playback controls and the volume level, then fades away.
 
