@@ -1,0 +1,5 @@
+# Link the Visual C++ runtime statically. Without it, the executable needs
+# VCRUNTIME140.dll, which a fresh Windows does not have (it then fails to
+# start with 0xC0000135).
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]
