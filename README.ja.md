@@ -2,7 +2,7 @@
 
 [English](README.md)
 
-> **開発の初期段階です。** Windows 版から作っています。再生中の曲・音量・音量キーに合わせて表示します。タスクトレイのアイコンから、設定ウィンドウを開く（`flexflyout --settings` でも開けます）・Windows の起動時に開始するかを切り替える・終了する、ができます。設定は `%APPDATA%\flexflyout\config.toml` に保存され、手で書き換えることもできます。`flexflyout --demo` で見本の曲を表示できます。
+> **開発の初期段階です。** Windows 11 版から作っています。Linux のデスクトップは、その後に対応します。
 
 柔軟に調整できる、クロスプラットフォームのメディアの Flyout です。音量を変えたときや新しい曲が始まったときに、再生中の曲の情報（ジャケット・曲名・アーティスト）を、再生位置、再生の操作ボタン（シャッフル・リピートを含む）、音量と一緒に表示し、しばらくすると消えます。バーをクリック・ドラッグすると再生位置や音量を変えられます。ピン留めすると表示したままになり、好きな位置へドラッグで動かせます（その位置を次からの表示位置にすることもできます）。すぐに閉じるボタンもあります。
 
@@ -18,12 +18,32 @@
 
 | 環境 | 状況 |
 |---|---|
-| Windows 11 | 最初に作る |
+| Windows 11 | 公開中（x86_64） |
 | Linux — KDE Plasma（Wayland） | 予定 |
 | Linux — GNOME（Wayland） | 予定。FlexFlyout から送った内容を描くだけの、小さな GNOME Shell 拡張として作る |
 | macOS | 将来 |
 
-## 仕組み（予定）
+## インストール（Windows 11）
+
+[Scoop](https://scoop.sh) で入れると、スタートメニューにも追加されます（`scoop update flexflyout` で更新できます。先にタスクトレイのアイコンから FlexFlyout を終了してください）。
+
+```powershell
+scoop install https://raw.githubusercontent.com/akivajp/flexflyout/main/packaging/scoop/flexflyout.json
+```
+
+または、[Releases](https://github.com/akivajp/flexflyout/releases) のページから `flexflyout-<版>-x86_64-pc-windows-msvc.zip` を取り、好きな場所に展開して `flexflyout.exe` を起動します（チェックサムは `SHA256SUMS`）。まだコード署名をしていないため、初回に Windows SmartScreen の警告が出ることがあります。**詳細情報** → **実行** を選んでください。
+
+FlexFlyout は通知領域（タスクトレイ）で動きます。メニューから、Flyout の表示・設定ウィンドウ・**Windows の起動時に開始**の切り替え・終了ができます。設定は `%APPDATA%\flexflyout\config.toml` に保存され、手で書き換えることもできます（保存して1秒以内に反映）。`flexflyout --help` でコマンドラインのオプションを、`flexflyout --demo` で見本の曲を表示できます。
+
+### アンインストール
+
+1. タスクトレイのメニューで **Windows の起動時に開始** を外し、FlexFlyout を終了します（Scoop の場合は自動で外れます）。
+2. `scoop uninstall flexflyout` を実行するか、zip を展開したフォルダーを消します。
+3. 必要なら、設定とログも消します: `%APPDATA%\flexflyout` と `%LOCALAPPDATA%\flexflyout`。
+
+Windows 標準の音量表示を消す設定にしていた場合も、FlexFlyout を終了すれば元に戻ります。
+
+## 仕組み
 
 - **再生中の曲の情報と操作**: Windows は System Media Transport Controls（SMTC）、Linux は MPRIS
 - **音量**: Windows は Core Audio、Linux は PipeWire / PulseAudio
@@ -33,6 +53,17 @@
 ## 作る理由
 
 Windows 10 では、音量の表示に、再生中の曲と再生の操作ボタンも出ていました。Windows 11 では、この部分が無くなりました。代わりになる他社のソフトは、最近の Windows 11 で動かなくなったか、大きさや位置をほとんど調整できず、Linux のデスクトップで動くものもありません。FlexFlyout は、この2つの穴を埋めることを目指します。
+
+## コード署名の方針
+
+Windows 版のリリースは、[SignPath Foundation](https://signpath.org) によるコード署名を予定しています。それまでのリリースには署名がありません。承認後は、[SignPath.io](https://about.signpath.io) による無償のコード署名、[SignPath Foundation](https://signpath.org) の証明書を使います。
+
+- **署名するもの**: Windows 版のリリースの zip に入っている `flexflyout.exe`。このリポジトリのタグのソースから GitHub Actions（[`release.yml`](.github/workflows/release.yml)）でビルドしたものだけです。ほかの場所でビルドしたものには署名せず、署名の依頼は毎回、人が承認します。
+- **体制**: [Akiva Miura（@akivajp）](https://github.com/akivajp) が作者・レビュー担当・承認者です。ほかの人からの変更はプルリクエストで受け、レビューしてから取り込みます。
+
+### プライバシー
+
+FlexFlyout は利用状況を送信せず、ネットワークに一切接続しません。メディアプレーヤーが Windows に知らせる情報（曲、ジャケット、再生位置）と音量を読み、Flyout を出すきっかけとして音量キーとメディアキーを見るだけです（ほかのキーは記録も保存もしません）。設定とログは手元の PC にだけ置かれます。
 
 ## ライセンス
 
