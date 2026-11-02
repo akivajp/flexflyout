@@ -7,6 +7,15 @@ include breaking changes).
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-11-02
+
+### Fixed
+- Linux: changing the size, or an anchor other than the top right (on KDE
+  Plasma), ended FlexFlyout as soon as the flyout showed. A frame was
+  drawn at the size asked for while the surface still had the size the
+  compositor had given it; the frames now follow the compositor's size,
+  and a graphics error loses a frame (logged) instead of ending the app.
+
 ## [0.3.0] - 2026-11-02
 
 ### Added
@@ -66,7 +75,8 @@ The first release, for Windows 11.
 - English and Japanese.
 - `flexflyout --demo` shows sample tracks.
 
-[Unreleased]: https://github.com/akivajp/flexflyout/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/akivajp/flexflyout/compare/v0.3.1...HEAD
+[0.3.1]: https://github.com/akivajp/flexflyout/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/akivajp/flexflyout/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/akivajp/flexflyout/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/akivajp/flexflyout/releases/tag/v0.1.0

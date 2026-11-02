@@ -194,6 +194,12 @@ struct Shown {
     applied: Placement,
     /// Whether the compositor has sized it (only then can it be drawn).
     configured: bool,
+    /// The size the compositor gave it (logical pixels). It can differ from
+    /// the one asked for, and a new size asked for applies only once the
+    /// compositor answers: the frames are drawn at this one.
+    size: (u32, u32),
+    /// The size the wgpu surface is configured for (buffer pixels).
+    target_size: (u32, u32),
     /// The output's integer scale (buffer pixels per logical pixel).
     scale: i32,
 }
@@ -342,6 +348,8 @@ impl Wayland {
             placement,
             applied,
             configured: false,
+            size: (placement.width, placement.height),
+            target_size: (0, 0),
             scale: 1,
         });
     }
@@ -437,12 +445,20 @@ impl Wayland {
             }
             configure_target(shown, self.gpu.as_ref()?);
         }
+        // The scale can change without a configure: keep the buffer in step.
+        let pixels = (
+            shown.size.0 * shown.scale as u32,
+            shown.size.1 * shown.scale as u32,
+        );
+        if shown.target_size != pixels {
+            configure_target(shown, self.gpu.as_ref()?);
+        }
         let gpu = self.gpu.as_mut()?;
         let target = shown.target.as_ref()?;
         let scale = shown.scale as f32;
         let size_points = egui::vec2(
-            shown.placement.width as f32 / self.zoom,
-            shown.placement.height as f32 / self.zoom,
+            shown.size.0 as f32 / self.zoom,
+            shown.size.1 as f32 / self.zoom,
         );
         let mut input = egui::RawInput {
             screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, size_points)),
@@ -470,10 +486,7 @@ impl Wayland {
             }
         };
         let screen = egui_wgpu::ScreenDescriptor {
-            size_in_pixels: [
-                shown.placement.width * shown.scale as u32,
-                shown.placement.height * shown.scale as u32,
-            ],
+            size_in_pixels: [pixels.0, pixels.1],
             pixels_per_point: output.pixels_per_point,
         };
         for (id, deltas) in &output.textures_delta.set {
@@ -560,6 +573,11 @@ fn make_target(
         let (device, queue) =
             pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default()))
                 .context("cannot open the graphics device")?;
+        // wgpu panics on a validation error by default; a flyout that lives
+        // in the tray must rather lose a frame (and say so in the log).
+        device.on_uncaptured_error(std::sync::Arc::new(|err| {
+            log::error!("graphics error: {err}");
+        }));
         let capabilities = target.get_capabilities(&adapter);
         // egui draws in sRGB-encoded colors: a non-sRGB format, as eframe
         // picks.
@@ -584,7 +602,7 @@ fn make_target(
 }
 
 /// Configures the wgpu surface for the surface's size and scale.
-fn configure_target(shown: &Shown, gpu: &Gpu) {
+fn configure_target(shown: &mut Shown, gpu: &Gpu) {
     let Some(target) = &shown.target else {
         return;
     };
@@ -611,14 +629,18 @@ fn configure_target(shown: &Shown, gpu: &Gpu) {
         &wgpu::SurfaceConfiguration {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
             format: gpu.format,
-            width: shown.placement.width * shown.scale as u32,
-            height: shown.placement.height * shown.scale as u32,
+            width: shown.size.0 * shown.scale as u32,
+            height: shown.size.1 * shown.scale as u32,
             present_mode,
             desired_maximum_frame_latency: 2,
             alpha_mode,
             view_formats: vec![],
             color_space: wgpu::SurfaceColorSpace::Auto,
         },
+    );
+    shown.target_size = (
+        shown.size.0 * shown.scale as u32,
+        shown.size.1 * shown.scale as u32,
     );
 }
 
@@ -642,8 +664,14 @@ impl LayerShellHandler for Wayland {
         };
         let (width, height) = configure.new_size;
         if width > 0 && height > 0 {
-            shown.placement.width = width;
-            shown.placement.height = height;
+            if (width, height) != (shown.applied.width, shown.applied.height) {
+                log::info!(
+                    "the compositor sized the flyout {width}x{height} instead of {}x{}",
+                    shown.applied.width,
+                    shown.applied.height
+                );
+            }
+            shown.size = (width, height);
         }
         // A change of the margins (a slide, a drag) is applied by the
         // compositor once the configure it answers with is acknowledged
