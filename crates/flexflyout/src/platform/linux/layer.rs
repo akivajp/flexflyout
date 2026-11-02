@@ -58,28 +58,55 @@ pub struct Placement {
 }
 
 /// Where the flyout goes for the placement settings, `size` (logical
-/// pixels) and `slide` (how far out of place a sliding flyout is, as a
-/// distance in logical pixels towards its edge; see `layout::slide`).
+/// pixels), `slide` (how far out of place a sliding flyout is, as a
+/// distance in logical pixels towards its edge; see `layout::slide`) and
+/// the size of the output it shows on (logical pixels), if known.
 ///
 /// Next to an edge, the surface is anchored to it and the offset is the
-/// margin. Along a centered axis it is anchored to both edges, so that the
-/// compositor centers it, and the offset becomes twice the margin on the
-/// side it moves away from (the margins narrow the area it is centered
-/// in). The compositor keeps it clear of panels (their exclusive zones).
-pub fn placement(display: &Display, size: (u32, u32), slide: (i32, i32)) -> Placement {
+/// margin; the compositor keeps it clear of panels (their exclusive zones).
+/// Along a centered axis it is anchored to the start edge with the margin
+/// that centers it on the output, plus the offset. (Anchoring to both
+/// edges leaves the size to the compositor's reading of the protocol, and
+/// KWin sized it differently.) Without the output's size, the axis is left
+/// unanchored and the compositor centers it, without the offset.
+pub fn placement(
+    display: &Display,
+    size: (u32, u32),
+    slide: (i32, i32),
+    area: Option<(i32, i32)>,
+) -> Placement {
     use wlr_layer::Anchor as A;
     let (column, row) = edges(display.anchor);
     // One axis: the anchor flags and the margins at its start and end.
-    let axis = |edge: Edge, offset: i32, slide: i32, start: A, end: A| match edge {
-        Edge::Start => (start, offset + slide, 0),
-        Edge::End => (end, 0, offset - slide),
-        Edge::Center => {
-            let shift = offset + slide;
-            (start | end, (2 * shift).max(0), (-2 * shift).max(0))
-        }
-    };
-    let (horizontal, left, right) = axis(column, display.offset_x, slide.0, A::LEFT, A::RIGHT);
-    let (vertical, top, bottom) = axis(row, display.offset_y, slide.1, A::TOP, A::BOTTOM);
+    let axis =
+        |edge: Edge, offset: i32, slide: i32, length: u32, area: Option<i32>, start: A, end: A| {
+            match (edge, area) {
+                (Edge::Start, _) => (start, offset + slide, 0),
+                (Edge::End, _) => (end, 0, offset - slide),
+                (Edge::Center, Some(area)) => {
+                    (start, (area - length as i32) / 2 + offset + slide, 0)
+                }
+                (Edge::Center, None) => (A::empty(), 0, 0),
+            }
+        };
+    let (horizontal, left, right) = axis(
+        column,
+        display.offset_x,
+        slide.0,
+        size.0,
+        area.map(|a| a.0),
+        A::LEFT,
+        A::RIGHT,
+    );
+    let (vertical, top, bottom) = axis(
+        row,
+        display.offset_y,
+        slide.1,
+        size.1,
+        area.map(|a| a.1),
+        A::TOP,
+        A::BOTTOM,
+    );
     Placement {
         width: size.0,
         height: size.1,
@@ -232,6 +259,8 @@ pub struct Wayland {
     pointer_inside: bool,
     /// The zoom (the scale setting), to turn logical pixels into points.
     zoom: f32,
+    /// The output the flyout was last shown on.
+    entered: Option<wl_output::WlOutput>,
     /// Where the left button went down on the surface (logical pixels),
     /// while it is down.
     pressed_at: Option<(f64, f64)>,
@@ -283,6 +312,7 @@ impl Wayland {
             events: Vec::new(),
             pointer_inside: false,
             zoom: 1.0,
+            entered: None,
             pressed_at: None,
             pointer_at: (0.0, 0.0),
             dragging: false,
@@ -295,6 +325,16 @@ impl Wayland {
     /// Whether the mouse pointer rests on the flyout.
     pub fn pointer_inside(&self) -> bool {
         self.shown.is_some() && self.pointer_inside
+    }
+
+    /// The size (logical pixels) of the output `index`, or else of the one
+    /// the flyout is on (or the first one, before it is shown).
+    pub fn output_size(&self, index: Option<usize>) -> Option<(i32, i32)> {
+        let output = index
+            .and_then(|i| self.outputs.outputs().nth(i))
+            .or_else(|| self.entered.clone())
+            .or_else(|| self.outputs.outputs().next())?;
+        self.outputs.info(&output)?.logical_size
     }
 
     /// The outputs' names, in the order [`Placement::output`] counts them.
@@ -725,9 +765,16 @@ impl CompositorHandler for Wayland {
         &mut self,
         _: &Connection,
         _: &QueueHandle<Self>,
-        _: &wl_surface::WlSurface,
-        _: &wl_output::WlOutput,
+        surface: &wl_surface::WlSurface,
+        output: &wl_output::WlOutput,
     ) {
+        if self
+            .shown
+            .as_ref()
+            .is_some_and(|s| s.layer.wl_surface() == surface)
+        {
+            self.entered = Some(output.clone());
+        }
     }
 
     fn surface_leave(
@@ -976,52 +1023,68 @@ mod tests {
 
     #[test]
     fn corners_are_anchored_to_their_edges() {
-        let p = placement(&display(Anchor::TopRight), (400, 164), (0, 0));
+        let p = placement(&display(Anchor::TopRight), (400, 164), (0, 0), None);
         assert_eq!(p.anchor, A::TOP | A::RIGHT);
         assert_eq!(p.margins, (16, 24, 0, 0));
-        let p = placement(&display(Anchor::BottomLeft), (400, 164), (0, 0));
+        let p = placement(&display(Anchor::BottomLeft), (400, 164), (0, 0), None);
         assert_eq!(p.anchor, A::BOTTOM | A::LEFT);
         assert_eq!(p.margins, (0, 0, 16, 24));
     }
 
     #[test]
-    fn centered_axes_shift_by_narrowing_one_side() {
-        // Bottom center, 24 to the right: anchored to left and right, with
-        // the left margin twice the offset.
-        let p = placement(&display(Anchor::Bottom), (400, 164), (0, 0));
-        assert_eq!(p.anchor, A::LEFT | A::RIGHT | A::BOTTOM);
-        assert_eq!(p.margins, (0, 0, 16, 48));
-        let left = Display {
-            offset_x: -10,
-            ..display(Anchor::Bottom)
-        };
-        assert_eq!(placement(&left, (400, 164), (0, 0)).margins, (0, 20, 16, 0));
+    fn centered_axes_are_centered_on_the_output() {
+        // Bottom center of a 1920-wide output, 24 to the right: anchored to
+        // the left edge, (1920 - 400) / 2 + 24 from it.
+        let area = Some((1920, 1080));
+        let p = placement(&display(Anchor::Bottom), (400, 164), (0, 0), area);
+        assert_eq!(p.anchor, A::LEFT | A::BOTTOM);
+        assert_eq!(p.margins, (0, 0, 16, 784));
+        // The center, 16 down: both axes from their start edges.
+        let p = placement(&display(Anchor::Center), (400, 164), (0, 0), area);
+        assert_eq!(p.anchor, A::LEFT | A::TOP);
+        assert_eq!(p.margins, (474, 0, 0, 784));
+        // Without the output's size, the compositor centers it.
+        let p = placement(&display(Anchor::Left), (400, 164), (0, 0), None);
+        assert_eq!(p.anchor, A::LEFT);
+        assert_eq!(p.margins, (0, 0, 0, 24));
     }
 
     #[test]
     fn dragging_moves_the_margins_and_the_offsets() {
         // Top right, dragged 30 left and 10 down.
         let top_right = display(Anchor::TopRight);
-        let p = moved(placement(&top_right, (400, 164), (0, 0)), (-30, 10));
+        let p = moved(placement(&top_right, (400, 164), (0, 0), None), (-30, 10));
         assert_eq!(p.margins, (26, 54, 0, 0));
         let again = display_moved(&top_right, (-30, 10));
         assert_eq!((again.offset_x, again.offset_y), (54, 26));
-        assert_eq!(placement(&again, (400, 164), (0, 0)).margins, p.margins);
-        // Bottom center, dragged 40 left: past the middle to the other side.
+        assert_eq!(
+            placement(&again, (400, 164), (0, 0), None).margins,
+            p.margins
+        );
+        // Bottom center, dragged 40 left.
+        let area = Some((1920, 1080));
         let bottom = display(Anchor::Bottom);
-        let p = moved(placement(&bottom, (400, 164), (0, 0)), (-40, 0));
-        assert_eq!(p.margins, (0, 32, 16, 0));
+        let p = moved(placement(&bottom, (400, 164), (0, 0), area), (-40, 0));
+        assert_eq!(p.margins, (0, 0, 16, 744));
         let again = display_moved(&bottom, (-40, 0));
-        assert_eq!(placement(&again, (400, 164), (0, 0)).margins, p.margins);
+        assert_eq!(
+            placement(&again, (400, 164), (0, 0), area).margins,
+            p.margins
+        );
     }
 
     #[test]
     fn sliding_moves_towards_the_edge() {
         // Top right, sliding 28 up: a smaller top margin.
-        let p = placement(&display(Anchor::TopRight), (400, 164), (0, -28));
+        let p = placement(&display(Anchor::TopRight), (400, 164), (0, -28), None);
         assert_eq!(p.margins, (-12, 24, 0, 0));
-        // Bottom, sliding 28 down: a smaller bottom margin.
-        let p = placement(&display(Anchor::Bottom), (400, 164), (0, 28));
-        assert_eq!(p.margins, (0, 0, -12, 48));
+        // Bottom center, sliding 28 down: a smaller bottom margin.
+        let p = placement(
+            &display(Anchor::Bottom),
+            (400, 164),
+            (0, 28),
+            Some((1920, 1080)),
+        );
+        assert_eq!(p.margins, (0, 0, -12, 784));
     }
 }

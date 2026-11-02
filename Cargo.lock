@@ -1139,7 +1139,7 @@ dependencies = [
 
 [[package]]
 name = "flexflyout"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "anyhow",
  "clap",
@@ -1173,7 +1173,7 @@ dependencies = [
 
 [[package]]
 name = "flexflyout-core"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "serde",
  "serde_ignored",
@@ -1184,7 +1184,7 @@ dependencies = [
 
 [[package]]
 name = "flexflyout-ui"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "egui",
  "egui_kittest",

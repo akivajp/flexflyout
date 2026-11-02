@@ -7,6 +7,15 @@ include breaking changes).
 
 ## [Unreleased]
 
+## [0.3.2] - 2026-11-02
+
+### Fixed
+- Linux: the centered anchors (top, left, center, right, bottom) put the
+  flyout in the wrong place on KDE Plasma, with its controls on top of
+  each other. The flyout was anchored to both edges of a centered axis,
+  which KWin sized differently; it is now placed from the start edge,
+  centered on the output by its size.
+
 ## [0.3.1] - 2026-11-02
 
 ### Fixed
@@ -75,7 +84,8 @@ The first release, for Windows 11.
 - English and Japanese.
 - `flexflyout --demo` shows sample tracks.
 
-[Unreleased]: https://github.com/akivajp/flexflyout/compare/v0.3.1...HEAD
+[Unreleased]: https://github.com/akivajp/flexflyout/compare/v0.3.2...HEAD
+[0.3.2]: https://github.com/akivajp/flexflyout/compare/v0.3.1...v0.3.2
 [0.3.1]: https://github.com/akivajp/flexflyout/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/akivajp/flexflyout/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/akivajp/flexflyout/compare/v0.1.0...v0.2.0

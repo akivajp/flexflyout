@@ -207,15 +207,17 @@ impl Host {
             }
             Animation::Fade => (0, 0),
         };
-        let mut placement = layer::placement(display, size, slide);
         // The compositor picks the monitor for "primary" and "cursor" (KWin
         // shows it on the active one); a number names one.
-        if let Monitor::Number(n) = display.monitor {
-            let index = n as usize - 1;
-            if index < self.wayland.output_names().len() {
-                placement.output = Some(index);
+        let output = match display.monitor {
+            Monitor::Number(n) => {
+                Some(n as usize - 1).filter(|&i| i < self.wayland.output_names().len())
             }
-        }
+            Monitor::Primary | Monitor::Cursor => None,
+        };
+        let area = self.wayland.output_size(output);
+        let mut placement = layer::placement(display, size, slide, area);
+        placement.output = output;
         placement
     }
 
