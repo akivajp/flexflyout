@@ -7,6 +7,15 @@ include breaking changes).
 
 ## [Unreleased]
 
+### Added
+- KDE Plasma: the `native_osd` setting now applies to Plasma's own volume
+  popup. "avoid" (the default) keeps the flyout clear of where KWin puts
+  it (centered, two thirds down the screen); "hide" turns plasma-pa's
+  volume and mute popups off while FlexFlyout runs (brightness and the
+  others stay) and puts them back as they were when it quits, or at its
+  next start if it was killed. The settings window shows the option on
+  KDE Plasma.
+
 ## [0.3.2] - 2026-11-02
 
 ### Fixed

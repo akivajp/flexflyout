@@ -16,7 +16,7 @@ Screen sizes and monitor setups differ from desk to desk, so every part of the f
 - **Position** — nine anchor points plus pixel offsets
 - **Monitor** — the primary one, the one under the cursor, or a specific one
 - **Display time** and **opacity**
-- **The system's own volume indicator** (Windows) — keep it and place the flyout beside it, or hide it
+- **The system's own volume indicator** (Windows, KDE Plasma) — keep it and place the flyout clear of it, or hide it
 
 ## Platforms
 
@@ -63,7 +63,7 @@ cd flexflyout/packaging/aur/flexflyout-bin && makepkg -si
 
 Elsewhere (glibc 2.35 or newer), download `flexflyout-<version>-x86_64-unknown-linux-gnu.tar.gz` from the [Releases](https://github.com/akivajp/flexflyout/releases) page and put `flexflyout` on your `PATH`; `flexflyout.desktop` and `flexflyout.png` go to `~/.local/share/applications` and `~/.local/share/icons/hicolor/256x256/apps` for a menu entry.
 
-Start it from the menu or with `flexflyout`. The tray icon (on KDE Plasma) has the same menu as on Windows, with **Start at login** instead. The settings are in `~/.config/flexflyout/config.toml` and the log in `~/.local/state/flexflyout/`. KDE Plasma's own volume popup stays; it can be turned off in Plasma's audio settings.
+Start it from the menu or with `flexflyout`. The tray icon (on KDE Plasma) has the same menu as on Windows, with **Start at login** instead. The settings are in `~/.config/flexflyout/config.toml` and the log in `~/.local/state/flexflyout/`. As on Windows, FlexFlyout stays clear of KDE Plasma's own volume popup, or hides it (the volume popup only; Plasma's brightness and other popups stay) while it runs.
 
 To remove it: turn **Start at login** off (or delete `~/.config/autostart/flexflyout.desktop`), uninstall the package (`sudo pacman -R flexflyout-bin`) or delete the files, and delete `~/.config/flexflyout` and `~/.local/state/flexflyout` if you like.
 

@@ -192,6 +192,8 @@ fn init_logging(path: &std::path::Path) -> anyhow::Result<()> {
             platform::windows::native_osd::restore();
             platform::windows::tray::remove();
         }
+        #[cfg(target_os = "linux")]
+        platform::linux::native_osd::restore();
         default_hook(info);
     }));
     Ok(())

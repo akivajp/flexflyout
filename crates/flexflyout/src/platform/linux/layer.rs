@@ -116,6 +116,43 @@ pub fn placement(
     }
 }
 
+/// Where `placement` puts the flyout on an output of `area` (logical
+/// size), measured from the output's top-left corner. Panels are not
+/// known here, so this is where it would be without them.
+pub fn rect_on(placement: &Placement, area: (i32, i32)) -> flexflyout_core::layout::PixelRect {
+    use wlr_layer::Anchor as A;
+    let (top, right, bottom, left) = placement.margins;
+    let (width, height) = (placement.width as i32, placement.height as i32);
+    let along =
+        |start: bool, end: bool, start_margin: i32, end_margin: i32, length: i32, area: i32| {
+            if start {
+                start_margin
+            } else if end {
+                area - end_margin - length
+            } else {
+                (area - length) / 2
+            }
+        };
+    let anchor = placement.anchor;
+    let x = along(
+        anchor.contains(A::LEFT),
+        anchor.contains(A::RIGHT),
+        left,
+        right,
+        width,
+        area.0,
+    );
+    let y = along(
+        anchor.contains(A::TOP),
+        anchor.contains(A::BOTTOM),
+        top,
+        bottom,
+        height,
+        area.1,
+    );
+    flexflyout_core::layout::PixelRect::from_origin_size(x, y, width, height)
+}
+
 /// `placement` moved by `(dx, dy)` logical pixels (where the user dragged
 /// it): the margin on an anchored edge grows or shrinks, and a centered
 /// axis shifts as [`placement`] shifts it.

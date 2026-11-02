@@ -8,13 +8,13 @@
 # Language of the texts: "auto" (the system's), "en" or "ja".
 language = "auto"
 
-# What to do with the Windows volume indicator (Windows only; on KDE Plasma,
-# its own volume popup can be turned off in its audio settings):
+# What to do with the system's own volume indicator (Windows, and KDE
+# Plasma's volume popup; ignored elsewhere):
 #   "avoid" - leave it, and move the flyout out of its way if they overlap
 #   "hide"  - hide it. Windows uses the same window for the brightness,
-#             airplane mode and similar indicators, which are hidden too.
-#             It comes back when FlexFlyout quits (or at its next start, if
-#             it was ended from the Task Manager).
+#             airplane mode and similar indicators, which are hidden too; on
+#             KDE Plasma only the volume popup is turned off. It comes back
+#             when FlexFlyout quits (or at its next start, if it was killed).
 #   "keep"  - leave it and ignore it (the two may overlap)
 native_osd = "avoid"
 

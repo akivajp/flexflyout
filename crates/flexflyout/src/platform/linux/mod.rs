@@ -6,5 +6,6 @@ pub mod desktop;
 pub mod fonts;
 pub mod layer;
 pub mod media;
+pub mod native_osd;
 pub mod tray;
 pub mod volume;

@@ -193,6 +193,18 @@ fn autostart_label(loader: &FluentLanguageLoader) -> String {
     }
 }
 
+/// The texts of the system's volume indicator option (its name, and what
+/// hiding does), or `None` where it cannot be avoided or hidden.
+fn native_osd_labels() -> Option<(&'static str, &'static str)> {
+    #[cfg(windows)]
+    return Some(("settings-native-osd", "settings-native-osd-hide"));
+    #[cfg(target_os = "linux")]
+    return crate::platform::linux::native_osd::is_kde()
+        .then_some(("settings-native-osd-kde", "settings-native-osd-hide-kde"));
+    #[allow(unreachable_code)]
+    None
+}
+
 /// Opens the settings window (`--settings`, a process of its own), or
 /// brings it to the front if this process opened it already.
 pub fn open(config_file: &std::path::Path, lang: Option<&str>) {
@@ -476,14 +488,14 @@ impl SettingsWindow {
                     });
                 ui.end_row();
 
-                // Only Windows' volume indicator can be avoided or hidden.
-                if cfg!(windows) {
-                    ui.label(fl!(loader, "settings-native-osd"));
+                // The system's volume indicator, where it can be avoided or hidden.
+                if let Some((label, hide)) = native_osd_labels() {
+                    ui.label(loader.get(label));
                     ui.vertical(|ui| {
                         let mode = &mut self.config.general.native_osd;
                         for (value, id) in [
                             (NativeOsd::Avoid, "settings-native-osd-avoid"),
-                            (NativeOsd::Hide, "settings-native-osd-hide"),
+                            (NativeOsd::Hide, hide),
                             (NativeOsd::Keep, "settings-native-osd-keep"),
                         ] {
                             ui.radio_value(mode, value, loader.get(id));

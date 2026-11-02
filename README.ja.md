@@ -16,7 +16,7 @@
 - **位置**: 9か所の基準点と、ピクセル単位のずらし幅
 - **表示先のモニター**: メインのモニター、カーソルのある画面、番号で指定した画面
 - **表示時間**と**不透明度**
-- **OS 標準の音量表示**（Windows）: 残して、その横に並べて表示するか、消すか
+- **OS 標準の音量表示**（Windows・KDE Plasma）: 残して、重ならないように表示するか、消すか
 
 ## 対応する環境
 
@@ -63,7 +63,7 @@ cd flexflyout/packaging/aur/flexflyout-bin && makepkg -si
 
 ほかのディストリビューション（glibc 2.35 以降）では、[Releases](https://github.com/akivajp/flexflyout/releases) のページから `flexflyout-<版>-x86_64-unknown-linux-gnu.tar.gz` を取り、`flexflyout` を `PATH` の通った場所に置きます。メニュー項目が要る場合は、`flexflyout.desktop` を `~/.local/share/applications` に、`flexflyout.png` を `~/.local/share/icons/hicolor/256x256/apps` に置いてください。
 
-メニューか `flexflyout` で起動します。タスクトレイのアイコン（KDE Plasma）のメニューは Windows と同じで、自動起動は **ログイン時に開始** です。設定は `~/.config/flexflyout/config.toml`、ログは `~/.local/state/flexflyout/` にあります。KDE Plasma 自身の音量表示は残ります。消したい場合は Plasma の音声の設定で切ってください。
+メニューか `flexflyout` で起動します。タスクトレイのアイコン（KDE Plasma）のメニューは Windows と同じで、自動起動は **ログイン時に開始** です。設定は `~/.config/flexflyout/config.toml`、ログは `~/.local/state/flexflyout/` にあります。Windows と同じく、KDE Plasma 自身の音量表示と重ならないように表示するか、動いている間だけ消すかを選べます（消えるのは音量の表示だけで、明るさなどの表示は残ります）。
 
 消すときは、**ログイン時に開始** を外し（または `~/.config/autostart/flexflyout.desktop` を消し）、パッケージを外す（`sudo pacman -R flexflyout-bin`）かファイルを消します。必要なら `~/.config/flexflyout` と `~/.local/state/flexflyout` も消してください。
 

@@ -8,7 +8,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use anyhow::Context as _;
-use flexflyout_core::config::{Animation, Monitor};
+use flexflyout_core::config::{Animation, Monitor, NativeOsd};
 use flexflyout_core::layout::{self, PixelRect};
 use flexflyout_core::{Change, Command, Config};
 use flexflyout_ui::{BASE_SIZE, Labels};
@@ -24,7 +24,10 @@ use crate::message::{Message, TrayCommand, Trigger};
 use crate::platform::linux::layer::{self, Wayland};
 use crate::platform::linux::media::{self, Media};
 use crate::platform::linux::volume::{self, VolumeControl};
-use crate::platform::linux::{desktop, tray};
+use crate::platform::linux::{desktop, native_osd, tray};
+
+/// Distance kept from Plasma's volume popup, in logical pixels.
+const NATIVE_OSD_GAP: i32 = 12;
 
 /// Time between frames while the flyout fades or slides.
 const FRAME: Duration = Duration::from_millis(16);
@@ -137,6 +140,7 @@ pub fn run(
         config_file: options.config_file.clone(),
     };
     log::info!("outputs: {:?}", host.wayland.output_names());
+    native_osd::start(host.state.config.general.native_osd);
     while !host.exit {
         let timeout = host.tick();
         event_loop
@@ -145,6 +149,7 @@ pub fn run(
         host.wayland.flush();
     }
     host.wayland.hide();
+    native_osd::restore();
     Ok(())
 }
 
@@ -155,6 +160,10 @@ impl Host {
             Received::Content => {}
             Received::Settings(old) => {
                 log::debug!("settings changed from {old:?}");
+                let mode = self.state.config.general.native_osd;
+                if mode != old.general.native_osd {
+                    native_osd::set_mode(mode);
+                }
                 // A remembered drag comes back as new settings, which
                 // place the flyout there now.
                 self.wayland.forget_drag();
@@ -218,6 +227,21 @@ impl Host {
         let area = self.wayland.output_size(output);
         let mut placement = layer::placement(display, size, slide, area);
         placement.output = output;
+        // Clear of Plasma's volume popup: moved as the resting place would
+        // have to move.
+        if self.state.config.general.native_osd == NativeOsd::Avoid
+            && native_osd::is_kde()
+            && let Some(area) = area
+        {
+            let rest = layer::rect_on(&layer::placement(display, size, (0, 0), Some(area)), area);
+            let clear = layout::avoid(
+                rest,
+                native_osd::estimate(area),
+                PixelRect::from_origin_size(0, 0, area.0, area.1),
+                NATIVE_OSD_GAP,
+            );
+            placement = layer::moved(placement, (clear.left - rest.left, clear.top - rest.top));
+        }
         placement
     }
 
