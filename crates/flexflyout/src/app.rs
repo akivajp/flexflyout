@@ -185,6 +185,8 @@ struct FlyoutApp {
     placement: SharedPlacement,
     /// The settings file, where a dragged place is remembered.
     config_file: PathBuf,
+    /// The language given on the command line, for the settings window.
+    lang: Option<String>,
     show_via_egui: bool,
     /// Why and when the flyout was last asked to show, until the first
     /// frame after that has been drawn (then the delay is logged).
@@ -274,6 +276,7 @@ impl FlyoutApp {
             window,
             placement,
             config_file: options.config_file.clone(),
+            lang: options.lang.clone(),
             show_via_egui: options.show_via_egui,
             pending: None,
             cleared: false,
@@ -599,6 +602,9 @@ impl FlyoutApp {
             // Windows moves the window from here, until the button is
             // released (see `finish_move`).
             (Command::StartMove, _) => self.window.start_move(),
+            (Command::OpenSettings, _) => {
+                crate::settings_window::open(&self.config_file, self.lang.as_deref());
+            }
             (Command::SetVolume(level), Some(controls)) => controls.volume.set_level(level),
             (Command::ToggleMute, Some(controls)) => controls.volume.toggle_mute(),
             (_, Some(controls)) => controls.media.command(command),

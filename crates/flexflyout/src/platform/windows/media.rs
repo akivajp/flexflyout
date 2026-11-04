@@ -444,7 +444,8 @@ fn send_command(current: Option<&Current>, command: Command) {
         | Command::ToggleMute
         | Command::Pin(_)
         | Command::Close
-        | Command::StartMove => {
+        | Command::StartMove
+        | Command::OpenSettings => {
             log::warn!("{command:?} is not for the player");
             return;
         }

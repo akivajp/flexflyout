@@ -7,6 +7,10 @@ include breaking changes).
 
 ## [Unreleased]
 
+### Added
+- A settings button (a gear) at the right end of the flyout's volume row
+  opens the settings window, as Settings… in the tray menu does.
+
 ## [0.4.0] - 2026-11-05
 
 ### Added

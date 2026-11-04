@@ -11,6 +11,7 @@ volume = 音量
 mute = ミュート
 pin = 表示したままにする（ドラッグで移動）
 close = 閉じる
+settings = 設定
 
 # 通知領域のアイコンのメニュー。
 tray-show = Flyout を表示

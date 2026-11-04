@@ -50,6 +50,8 @@ pub struct Labels {
     pub pin: String,
     /// The close button (hides the flyout now).
     pub close: String,
+    /// The settings button (opens the settings window).
+    pub settings: String,
 }
 
 /// Everything the panel shows in one frame.
@@ -299,6 +301,25 @@ pub fn draw(ui: &mut Ui, view: &FlyoutView<'_>) -> Option<Command> {
         }
     }
 
+    // The settings button at the right end of the bottom row (the top row
+    // keeps its room for the title).
+    let bottom_y = cover.bottom() - SMALL_BUTTON_SIZE.y / 2.0;
+    let settings = Rect::from_center_size(
+        pos2(right - SMALL_BUTTON_SIZE.x / 2.0, bottom_y),
+        SMALL_BUTTON_SIZE,
+    );
+    if button(
+        ui,
+        settings,
+        Icon::Settings,
+        &labels.settings,
+        Some(SECONDARY_TEXT),
+        &mut on_control,
+    ) {
+        command = Some(Command::OpenSettings);
+    }
+    let volume_right = settings.left() - 8.0;
+
     // Mute button and volume bar along the bottom, with the level on the
     // right. The volume follows the pointer while the bar is held.
     if let Some(volume) = view.volume {
@@ -336,7 +357,7 @@ pub fn draw(ui: &mut Ui, view: &FlyoutView<'_>) -> Option<Command> {
             .fold(BAR_LABEL_WIDTH - 8.0, f32::max);
         let bar = Rect::from_min_max(
             pos2(mute.right() + 8.0, y - 3.0),
-            pos2(right - label_width - 12.0, y + 3.0),
+            pos2(volume_right - label_width - 12.0, y + 3.0),
         );
         let level = volume.level.clamp(0.0, 1.0);
         let (response, shown) = slider(ui, bar, level, &labels.volume, true);
@@ -358,7 +379,7 @@ pub fn draw(ui: &mut Ui, view: &FlyoutView<'_>) -> Option<Command> {
             format!("{}%", shown_volume.percent())
         };
         painter.text(
-            pos2(right, y),
+            pos2(volume_right, y),
             Align2::RIGHT_CENTER,
             label,
             font,
@@ -533,6 +554,8 @@ enum Icon {
     SpeakerMuted,
     Pin,
     Close,
+    /// A gear: the settings.
+    Settings,
 }
 
 /// Draws `icon` centered on `center`, `r` points from the center to the edge.
@@ -646,6 +669,22 @@ fn paint_icon(painter: &egui::Painter, icon: Icon, center: Pos2, r: f32, color: 
                 }
             }
         }
+        Icon::Settings => {
+            // Eight teeth around a ring, with a hole in the middle.
+            let teeth = r * 0.95;
+            for i in 0..8 {
+                let angle = i as f32 * std::f32::consts::FRAC_PI_4;
+                let (s, c) = angle.sin_cos();
+                painter.line_segment(
+                    [
+                        pos2(x + c * r * 0.5, y + s * r * 0.5),
+                        pos2(x + c * teeth, y + s * teeth),
+                    ],
+                    Stroke::new(r * 0.32, color),
+                );
+            }
+            painter.circle_stroke(center, r * 0.55, Stroke::new(r * 0.3, color));
+        }
         Icon::Close => {
             let d = r * 0.75;
             painter.line_segment([pos2(x - d, y - d), pos2(x + d, y + d)], line);
@@ -728,6 +767,7 @@ mod tests {
             mute: "Mute".into(),
             pin: "Pin".into(),
             close: "Close".into(),
+            settings: "Settings".into(),
         }
     }
 
@@ -793,6 +833,7 @@ mod tests {
         let mut harness = harness(&track, &labels, now);
         for (name, expected) in [
             ("Close", Command::Close),
+            ("Settings", Command::OpenSettings),
             ("Previous", Command::Previous),
             ("Play / pause", Command::TogglePlayPause),
             ("Next", Command::Next),
@@ -805,7 +846,7 @@ mod tests {
             harness.run();
             assert_eq!(harness.state().last(), Some(&expected), "button {name}");
         }
-        assert_eq!(harness.state().len(), 8);
+        assert_eq!(harness.state().len(), 9);
     }
 
     #[test]

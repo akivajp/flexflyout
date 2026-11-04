@@ -157,7 +157,7 @@ impl FlyoutState {
                 self.timer.trigger(now);
                 None
             }
-            Command::StartMove => Some(command),
+            Command::StartMove | Command::OpenSettings => Some(command),
             Command::SetVolume(level) if demo => {
                 if let Some(volume) = &mut self.volume {
                     volume.level = level;

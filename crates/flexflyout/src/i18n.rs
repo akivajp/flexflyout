@@ -87,6 +87,7 @@ pub fn labels(loader: &FluentLanguageLoader) -> Labels {
         mute: fl!(loader, "mute"),
         pin: fl!(loader, "pin"),
         close: fl!(loader, "close"),
+        settings: fl!(loader, "settings"),
     }
 }
 

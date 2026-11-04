@@ -65,6 +65,8 @@ struct Host {
     pending: Option<(crate::message::Trigger, Instant)>,
     /// The settings file, where a dragged place is remembered.
     config_file: PathBuf,
+    /// The language given on the command line, for the settings window.
+    lang: Option<String>,
 }
 
 /// Runs the flyout until it is asked to quit.
@@ -138,6 +140,7 @@ pub fn run(
         exit: false,
         pending: None,
         config_file: options.config_file.clone(),
+        lang: options.lang.clone(),
     };
     log::info!("outputs: {:?}", host.wayland.output_names());
     native_osd::start(host.state.config.general.native_osd);
@@ -280,6 +283,9 @@ impl Host {
         };
         match (command, &self.controls) {
             (Command::StartMove, _) => self.wayland.start_move(),
+            (Command::OpenSettings, _) => {
+                crate::settings_window::open(&self.config_file, self.lang.as_deref());
+            }
             (Command::SetVolume(level), Some(controls)) => controls.volume.set_level(level),
             (Command::ToggleMute, Some(controls)) => controls.volume.toggle_mute(),
             (_, Some(controls)) => controls.media.command(command),

@@ -201,6 +201,8 @@ pub enum Command {
     /// Start moving the (pinned) flyout with the mouse: the pointer was
     /// pressed on its background and is being dragged.
     StartMove,
+    /// Open the settings window.
+    OpenSettings,
 }
 
 #[cfg(test)]

@@ -11,6 +11,7 @@ volume = Volume
 mute = Mute
 pin = Keep shown (drag to move)
 close = Close
+settings = Settings
 
 # The menu of the notification area icon.
 tray-show = Show the flyout
