@@ -7,6 +7,8 @@ include breaking changes).
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-11-05
+
 ### Added
 - A settings button (a gear) at the right end of the flyout's volume row
   opens the settings window, as Settings… in the tray menu does.
@@ -99,7 +101,8 @@ The first release, for Windows 11.
 - English and Japanese.
 - `flexflyout --demo` shows sample tracks.
 
-[Unreleased]: https://github.com/akivajp/flexflyout/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/akivajp/flexflyout/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/akivajp/flexflyout/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/akivajp/flexflyout/compare/v0.3.2...v0.4.0
 [0.3.2]: https://github.com/akivajp/flexflyout/compare/v0.3.1...v0.3.2
 [0.3.1]: https://github.com/akivajp/flexflyout/compare/v0.3.0...v0.3.1
