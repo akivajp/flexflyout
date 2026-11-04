@@ -7,6 +7,8 @@ include breaking changes).
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-11-05
+
 ### Added
 - Appearance settings (`[appearance]`, and a new section in the settings
   window): a dark or light theme, the accent color of the bars and of the
@@ -113,7 +115,8 @@ The first release, for Windows 11.
 - English and Japanese.
 - `flexflyout --demo` shows sample tracks.
 
-[Unreleased]: https://github.com/akivajp/flexflyout/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/akivajp/flexflyout/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/akivajp/flexflyout/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/akivajp/flexflyout/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/akivajp/flexflyout/compare/v0.3.2...v0.4.0
 [0.3.2]: https://github.com/akivajp/flexflyout/compare/v0.3.1...v0.3.2
