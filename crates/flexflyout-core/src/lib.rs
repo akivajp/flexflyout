@@ -12,7 +12,7 @@ pub mod config;
 pub mod layout;
 mod timer;
 
-pub use config::Config;
+pub use config::{Appearance, Config, Theme};
 pub use timer::{FlyoutTimer, Timing};
 
 /// Playback state reported by the media player.

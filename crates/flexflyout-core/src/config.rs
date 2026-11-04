@@ -39,6 +39,79 @@ pub struct Config {
     pub display: Display,
     /// How long the flyout stays and how it fades.
     pub timing: TimingConfig,
+    /// The panel's colors, shape and parts.
+    pub appearance: Appearance,
+}
+
+/// Largest corner radius, in points (the panel is 164 points tall at most).
+pub const MAX_CORNER_RADIUS: u8 = 32;
+
+/// The panel's colors, shape and parts.
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+#[serde(default)]
+pub struct Appearance {
+    /// Dark or light colors.
+    pub theme: Theme,
+    /// Color of the bars and of the buttons that are on, as `#rrggbb`.
+    pub accent: String,
+    /// Roundness of the panel's corners, in points (0 = square).
+    pub corner_radius: u8,
+    /// Whether to show the cover art.
+    pub show_cover_art: bool,
+    /// Whether to show the position in the track (the seek bar).
+    pub show_position: bool,
+    /// Whether to show the shuffle and repeat buttons.
+    pub show_shuffle_repeat: bool,
+    /// Whether to show the volume bar and the mute button.
+    pub show_volume: bool,
+}
+
+impl Default for Appearance {
+    fn default() -> Self {
+        Self {
+            theme: Theme::default(),
+            accent: DEFAULT_ACCENT.to_owned(),
+            corner_radius: 14,
+            show_cover_art: true,
+            show_position: true,
+            show_shuffle_repeat: true,
+            show_volume: true,
+        }
+    }
+}
+
+/// The default accent color.
+pub const DEFAULT_ACCENT: &str = "#5aa0ff";
+
+impl Appearance {
+    /// The accent color's red, green and blue (the default one if the
+    /// setting cannot be read).
+    pub fn accent_rgb(&self) -> (u8, u8, u8) {
+        parse_rgb(&self.accent)
+            .or_else(|| parse_rgb(DEFAULT_ACCENT))
+            .unwrap_or((90, 160, 255))
+    }
+}
+
+/// Reads `#rrggbb` (the `#` may be left out).
+pub fn parse_rgb(text: &str) -> Option<(u8, u8, u8)> {
+    let hex = text.trim().trim_start_matches('#');
+    if hex.len() != 6 || !hex.is_ascii() {
+        return None;
+    }
+    let part = |i: usize| u8::from_str_radix(&hex[i..i + 2], 16).ok();
+    Some((part(0)?, part(2)?, part(4)?))
+}
+
+/// Dark or light colors.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum Theme {
+    /// Light text on a dark panel.
+    #[default]
+    Dark,
+    /// Dark text on a light panel.
+    Light,
 }
 
 /// Settings that are not about the look.
@@ -371,6 +444,21 @@ impl Config {
 
     /// Brings every value into its range, with a warning for each change.
     fn clamp(&mut self, warnings: &mut Vec<String>) {
+        let appearance = &mut self.appearance;
+        if parse_rgb(&appearance.accent).is_none() {
+            warnings.push(format!(
+                "`appearance.accent` = {:?} is not a color like \"#5aa0ff\"; using {DEFAULT_ACCENT}",
+                appearance.accent
+            ));
+            appearance.accent = DEFAULT_ACCENT.to_owned();
+        }
+        if appearance.corner_radius > MAX_CORNER_RADIUS {
+            warnings.push(format!(
+                "`appearance.corner_radius` = {} is more than {MAX_CORNER_RADIUS}; using {MAX_CORNER_RADIUS}",
+                appearance.corner_radius
+            ));
+            appearance.corner_radius = MAX_CORNER_RADIUS;
+        }
         let display = &mut self.display;
         clamp_f32(
             "display.scale",
@@ -663,6 +751,22 @@ mod tests {
             Err(Error::Parse(_))
         ));
         assert_eq!(std::fs::read_to_string(&path).unwrap(), "[display\n");
+    }
+
+    #[test]
+    fn accent_colors_are_read_or_replaced() {
+        assert_eq!(parse_rgb("#5aa0ff"), Some((0x5a, 0xa0, 0xff)));
+        assert_eq!(parse_rgb("FF8800"), Some((255, 136, 0)));
+        assert_eq!(parse_rgb("#fff"), None);
+        assert_eq!(parse_rgb("#ggggg0"), None);
+        let loaded = Config::parse(
+            "[appearance]\naccent = \"blue\"\ncorner_radius = 99\ntheme = \"light\"\n",
+        )
+        .unwrap();
+        assert_eq!(loaded.config.appearance.accent, DEFAULT_ACCENT);
+        assert_eq!(loaded.config.appearance.corner_radius, MAX_CORNER_RADIUS);
+        assert_eq!(loaded.config.appearance.theme, Theme::Light);
+        assert_eq!(loaded.warnings.len(), 2, "{:?}", loaded.warnings);
     }
 
     #[test]

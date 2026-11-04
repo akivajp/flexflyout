@@ -17,7 +17,7 @@ use eframe::egui;
 use flexflyout_core::config::{Animation, Display, Monitor, NativeOsd};
 use flexflyout_core::layout::{self, MonitorArea, PixelRect};
 use flexflyout_core::{Change, Command, Config};
-use flexflyout_ui::{BASE_SIZE, Labels};
+use flexflyout_ui::{Labels, panel_size};
 
 use crate::flyout::{FlyoutState, Received};
 use crate::i18n::TrayLabels;
@@ -63,7 +63,7 @@ pub fn run(
     let native_options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_title("FlexFlyout")
-            .with_inner_size(BASE_SIZE)
+            .with_inner_size(panel_size(&config.appearance))
             .with_decorations(false)
             .with_transparent(true)
             .with_always_on_top()
@@ -97,6 +97,8 @@ struct Placement {
     native_osd: NativeOsd,
     /// How the flyout comes and goes.
     animation: Animation,
+    /// Size of the panel at scale 1.0 (it depends on the parts shown).
+    size: egui::Vec2,
     /// Where the window was placed last (where it rests, when sliding).
     rect: Option<PixelRect>,
     /// Where the user moved the shown window to: it stays there until it
@@ -109,11 +111,12 @@ struct Placement {
 struct SharedPlacement(Arc<Mutex<Placement>>);
 
 impl SharedPlacement {
-    fn new(display: Display, native_osd: NativeOsd, animation: Animation) -> Self {
+    fn new(config: &Config) -> Self {
         Self(Arc::new(Mutex::new(Placement {
-            display,
-            native_osd,
-            animation,
+            display: config.display.clone(),
+            native_osd: config.general.native_osd,
+            animation: config.timing.animation,
+            size: panel_size(&config.appearance),
             rect: None,
             moved_to: None,
         })))
@@ -135,8 +138,8 @@ impl SharedPlacement {
         let monitors = monitor::list();
         let rect = layout::choose_monitor(&monitors, placement.display.monitor, monitor::cursor())
             .map(|i| {
-                let rect =
-                    layout::place(&placement.display, &monitors[i], (BASE_SIZE.x, BASE_SIZE.y));
+                let size = (placement.size.x, placement.size.y);
+                let rect = layout::place(&placement.display, &monitors[i], size);
                 match placement.native_osd {
                     NativeOsd::Avoid => avoid_native_osd(rect, &monitors[i], &monitors),
                     NativeOsd::Hide | NativeOsd::Keep => rect,
@@ -232,11 +235,7 @@ impl FlyoutApp {
         let (sender, messages) = channel();
         let ctx = cc.egui_ctx.clone();
         let raw = window.raw();
-        let placement = SharedPlacement::new(
-            config.display.clone(),
-            config.general.native_osd,
-            config.timing.animation,
-        );
+        let placement = SharedPlacement::new(&config);
         native_osd::start(config.general.native_osd);
         let show_via_egui = options.show_via_egui;
         let send = {
@@ -426,6 +425,7 @@ fn send(
             placement.display = config.display.clone();
             placement.native_osd = config.general.native_osd;
             placement.animation = config.timing.animation;
+            placement.size = panel_size(&config.appearance);
             // New settings place the flyout anew (a remembered drag comes
             // back here as new settings too).
             placement.moved_to = None;

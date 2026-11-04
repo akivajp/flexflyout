@@ -3,7 +3,7 @@
 //! The panel is drawn from a snapshot of what to show ([`FlyoutView`]) and
 //! reports what the user did with its controls as a [`Command`]. It knows
 //! nothing about windows or the OS: the host sizes the window to
-//! [`BASE_SIZE`] times its scale, sets egui's zoom factor to that scale and
+//! [`panel_size`] times its scale, sets egui's zoom factor to that scale and
 //! calls [`draw`].
 
 pub mod fonts;
@@ -15,10 +15,25 @@ use egui::{
     Align2, Color32, ColorImage, CornerRadius, FontId, Pos2, Rect, Response, RichText, Role, Sense,
     Shape, Stroke, StrokeKind, TextureHandle, TextureOptions, Ui, WidgetInfo, pos2, vec2,
 };
-use flexflyout_core::{Command, Cover, NowPlaying, PlaybackStatus, RepeatMode, Volume};
+use flexflyout_core::{
+    Appearance, Command, Cover, NowPlaying, PlaybackStatus, RepeatMode, Theme, Volume,
+};
 
-/// Size of the panel at scale 1.0, in egui points.
-pub const BASE_SIZE: egui::Vec2 = vec2(400.0, 164.0);
+/// Size of the panel at scale 1.0, in egui points, with the parts the
+/// settings show: it gets smaller without the cover art, the position or
+/// the volume.
+pub fn panel_size(appearance: &Appearance) -> egui::Vec2 {
+    let height = content_height(appearance);
+    let cover = if appearance.show_cover_art {
+        height + GAP
+    } else {
+        0.0
+    };
+    vec2(
+        2.0 * MARGIN + cover + column_width(appearance),
+        2.0 * MARGIN + height,
+    )
+}
 
 /// Texts shown on the panel, in the user's language.
 ///
@@ -59,8 +74,7 @@ pub struct Labels {
 pub struct FlyoutView<'a> {
     /// The current track, or `None` when nothing is playing.
     pub now_playing: Option<&'a NowPlaying>,
-    /// The volume, or `None` to leave out the volume bar (e.g. when the
-    /// system's own volume indicator is kept and already shows it).
+    /// The volume, or `None` while it is not known yet.
     pub volume: Option<Volume>,
     /// Whether the flyout is pinned (stays until unpinned).
     pub pinned: bool,
@@ -69,42 +83,140 @@ pub struct FlyoutView<'a> {
     /// Opacity of the panel's background, from the settings (0.0 to 1.0).
     /// The text and buttons stay opaque so that they remain readable.
     pub background_opacity: f32,
+    /// The colors, the corners and the parts to show, from the settings.
+    pub appearance: &'a Appearance,
     /// Translated texts.
     pub labels: &'a Labels,
 }
 
-/// Background color of the panel (before the opacity is applied).
-const BACKGROUND: Color32 = Color32::from_rgb(28, 28, 34);
-/// Placeholder color for the cover art.
-const COVER_PLACEHOLDER: Color32 = Color32::from_rgb(60, 60, 72);
-/// Color of the filled part of the bars, and of the buttons that are on.
-const ACCENT: Color32 = Color32::from_rgb(90, 160, 255);
-/// Color of the volume bar while muted.
-const VOLUME_MUTED: Color32 = Color32::from_gray(120);
-/// Color of the empty part of the bars.
-const BAR_TRACK: Color32 = Color32::from_gray(70);
-/// Color of the secondary text (artist, times, percentage).
-const SECONDARY_TEXT: Color32 = Color32::from_gray(190);
-/// Color of the icons of controls the player does not offer.
-const DISABLED: Color32 = Color32::from_gray(95);
+/// The colors of the panel, for its theme and accent color.
+///
+/// The panel uses its own colors rather than egui's theme, which follows
+/// the OS (light or dark) rather than the settings.
+#[derive(Clone, Copy, Debug)]
+struct Palette {
+    /// Background (before the opacity is applied).
+    background: Color32,
+    /// The cover art's placeholder.
+    cover_placeholder: Color32,
+    /// The title, the icons of the playback buttons and the bars' knob.
+    text: Color32,
+    /// The secondary text (artist, times, percentage) and the small icons.
+    secondary: Color32,
+    /// The icons of controls the player does not offer.
+    disabled: Color32,
+    /// The empty part of the bars.
+    bar_track: Color32,
+    /// The volume bar while muted.
+    muted: Color32,
+    /// The filled part of the bars, and the buttons that are on.
+    accent: Color32,
+    /// Background of the buttons: at rest, hovered and pressed
+    /// (translucent, premultiplied).
+    button_idle: Color32,
+    button_hovered: Color32,
+    button_pressed: Color32,
+}
 
-/// Background of the buttons: at rest, hovered and pressed (translucent
-/// white, premultiplied).
-const BUTTON_IDLE: Color32 = Color32::from_rgba_premultiplied(20, 20, 20, 20);
-const BUTTON_HOVERED: Color32 = Color32::from_rgba_premultiplied(40, 40, 40, 40);
-const BUTTON_PRESSED: Color32 = Color32::from_rgba_premultiplied(64, 64, 64, 64);
+impl Palette {
+    fn new(appearance: &Appearance) -> Self {
+        let (r, g, b) = appearance.accent_rgb();
+        let accent = Color32::from_rgb(r, g, b);
+        match appearance.theme {
+            Theme::Dark => Self {
+                background: Color32::from_rgb(28, 28, 34),
+                cover_placeholder: Color32::from_rgb(60, 60, 72),
+                text: Color32::WHITE,
+                secondary: Color32::from_gray(190),
+                disabled: Color32::from_gray(95),
+                bar_track: Color32::from_gray(70),
+                muted: Color32::from_gray(120),
+                accent,
+                // Translucent white.
+                button_idle: Color32::from_rgba_premultiplied(20, 20, 20, 20),
+                button_hovered: Color32::from_rgba_premultiplied(40, 40, 40, 40),
+                button_pressed: Color32::from_rgba_premultiplied(64, 64, 64, 64),
+            },
+            Theme::Light => Self {
+                background: Color32::from_rgb(243, 243, 246),
+                cover_placeholder: Color32::from_rgb(212, 212, 220),
+                text: Color32::from_rgb(20, 20, 24),
+                secondary: Color32::from_gray(85),
+                disabled: Color32::from_gray(178),
+                bar_track: Color32::from_gray(208),
+                muted: Color32::from_gray(150),
+                accent,
+                // Translucent black.
+                button_idle: Color32::from_rgba_premultiplied(0, 0, 0, 14),
+                button_hovered: Color32::from_rgba_premultiplied(0, 0, 0, 28),
+                button_pressed: Color32::from_rgba_premultiplied(0, 0, 0, 46),
+            },
+        }
+    }
+}
+
+/// How the buttons look.
+#[derive(Clone, Copy, Debug)]
+struct ButtonStyle {
+    colors: Palette,
+    /// Radius of their corners.
+    corner: u8,
+}
 
 /// Margin around the content, in points.
 const MARGIN: f32 = 16.0;
 /// Gap between the cover art and the text, in points.
 const GAP: f32 = 14.0;
+/// Width of the column right of the cover art (text and controls).
+const COLUMN_WIDTH: f32 = 222.0;
+/// Room for the settings button after the five playback buttons, when
+/// there is no volume row to put it in.
+const SETTINGS_ROOM: f32 = 36.0;
+/// Height of the title and the artist.
+const HEADER_HEIGHT: f32 = 44.0;
+/// Room between the header and the playback buttons with the position
+/// (in the middle) and without it.
+const POSITION_ROW: f32 = 22.0;
+const NO_POSITION_ROW: f32 = 6.0;
+/// Room between the playback buttons and the volume row.
+const VOLUME_GAP: f32 = 14.0;
 /// Size of the playback buttons, and the gap between them.
 const BUTTON_SIZE: egui::Vec2 = vec2(36.0, 28.0);
 const BUTTON_GAP: f32 = 6.0;
-/// Size of the small buttons (pin, mute).
+/// Size of the small buttons (close, pin, settings, mute).
 const SMALL_BUTTON_SIZE: egui::Vec2 = vec2(28.0, 24.0);
 /// Width kept for a time or the percentage next to a bar.
 const BAR_LABEL_WIDTH: f32 = 40.0;
+
+/// Top of the playback buttons, from the top of the content.
+fn buttons_top(appearance: &Appearance) -> f32 {
+    HEADER_HEIGHT
+        + if appearance.show_position {
+            POSITION_ROW
+        } else {
+            NO_POSITION_ROW
+        }
+}
+
+/// Width of the column right of the cover art.
+fn column_width(appearance: &Appearance) -> f32 {
+    if !appearance.show_volume && appearance.show_shuffle_repeat {
+        COLUMN_WIDTH + SETTINGS_ROOM
+    } else {
+        COLUMN_WIDTH
+    }
+}
+
+/// Height of the content (the panel without its margins), which is also
+/// the side of the cover art.
+fn content_height(appearance: &Appearance) -> f32 {
+    let volume = if appearance.show_volume {
+        VOLUME_GAP + SMALL_BUTTON_SIZE.y
+    } else {
+        0.0
+    };
+    buttons_top(appearance) + BUTTON_SIZE.y + volume
+}
 
 /// Draws the panel over the whole of `ui`'s area and returns what the user
 /// did with its controls in this frame, if anything.
@@ -114,13 +226,31 @@ pub fn draw(ui: &mut Ui, view: &FlyoutView<'_>) -> Option<Command> {
     let rect = ui.max_rect();
     let painter = ui.painter().clone();
     let labels = view.labels;
+    let appearance = view.appearance;
+    let colors = Palette::new(appearance);
     let mut command = None;
 
     // Rounded background. Its alpha comes from the settings only.
+    let corner = f32::from(appearance.corner_radius);
     let alpha = (view.background_opacity.clamp(0.0, 1.0) * 255.0).round() as u8;
-    let background =
-        Color32::from_rgba_unmultiplied(BACKGROUND.r(), BACKGROUND.g(), BACKGROUND.b(), alpha);
-    painter.rect_filled(rect, CornerRadius::same(14), background);
+    let background = Color32::from_rgba_unmultiplied(
+        colors.background.r(),
+        colors.background.g(),
+        colors.background.b(),
+        alpha,
+    );
+    painter.rect_filled(
+        rect,
+        CornerRadius::same(appearance.corner_radius),
+        background,
+    );
+    // The cover art and the buttons are rounded less than the panel, and
+    // square with it.
+    let cover_corner = (corner * 0.6).min(8.0).round() as u8;
+    let style = ButtonStyle {
+        colors,
+        corner: (corner * 0.45).min(6.0).round() as u8,
+    };
 
     // A pinned flyout can be dragged by its background. The controls are
     // added later, on top, so they keep their clicks and drags.
@@ -132,24 +262,34 @@ pub fn draw(ui: &mut Ui, view: &FlyoutView<'_>) -> Option<Command> {
     // Whether the pointer is on a control (where the "move" cursor would
     // be wrong, although a drag there moves the flyout too).
     let mut on_control = false;
+    // The rows of the content, from the top.
+    let top = rect.top() + MARGIN;
+    let side = content_height(appearance);
+    let buttons_top = top + buttons_top(appearance);
+    let volume_y = buttons_top + BUTTON_SIZE.y + VOLUME_GAP + SMALL_BUTTON_SIZE.y / 2.0;
 
-    // Square cover art on the left, as tall as the content area, or a
+    // Square cover art on the left, as tall as the content, or a
     // placeholder when the player gives none.
-    let side = rect.height() - 2.0 * MARGIN;
-    let cover = Rect::from_min_size(rect.min + vec2(MARGIN, MARGIN), vec2(side, side));
-    let art = view.now_playing.and_then(|track| track.cover.as_ref());
-    if !art.is_some_and(|art| paint_cover(ui, art, cover)) {
-        painter.rect_filled(cover, CornerRadius::same(8), COVER_PLACEHOLDER);
-        paint_note(&painter, cover.center(), side * 0.4, SECONDARY_TEXT);
+    let mut left = rect.left() + MARGIN;
+    if appearance.show_cover_art {
+        let cover = Rect::from_min_size(pos2(left, top), vec2(side, side));
+        let art = view.now_playing.and_then(|track| track.cover.as_ref());
+        if !art.is_some_and(|art| paint_cover(ui, art, cover, cover_corner)) {
+            painter.rect_filled(
+                cover,
+                CornerRadius::same(cover_corner),
+                colors.cover_placeholder,
+            );
+            paint_note(&painter, cover.center(), side * 0.4, colors.secondary);
+        }
+        // Text and controls to the right of the cover art.
+        left = cover.right() + GAP;
     }
-
-    // Text and controls to the right of the cover art.
-    let left = cover.right() + GAP;
     let right = rect.right() - MARGIN;
 
     // The close and pin buttons in the top-right corner.
     let close = Rect::from_min_size(
-        pos2(right - SMALL_BUTTON_SIZE.x, rect.top() + MARGIN - 4.0),
+        pos2(right - SMALL_BUTTON_SIZE.x, top - 4.0),
         SMALL_BUTTON_SIZE,
     );
     if button(
@@ -157,22 +297,51 @@ pub fn draw(ui: &mut Ui, view: &FlyoutView<'_>) -> Option<Command> {
         close,
         Icon::Close,
         &labels.close,
-        Some(SECONDARY_TEXT),
+        Some(colors.secondary),
+        style,
         &mut on_control,
     ) {
         command = Some(Command::Close);
     }
     let pin = close.translate(vec2(-(SMALL_BUTTON_SIZE.x + 4.0), 0.0));
-    let pin_color = if view.pinned { ACCENT } else { SECONDARY_TEXT };
+    let pin_color = if view.pinned {
+        colors.accent
+    } else {
+        colors.secondary
+    };
     if button(
         ui,
         pin,
         Icon::Pin,
         &labels.pin,
         Some(pin_color),
+        style,
         &mut on_control,
     ) {
         command = Some(Command::Pin(!view.pinned));
+    }
+
+    // The settings button at the right end of the last row: the volume, or
+    // the playback buttons without it.
+    let settings_y = if appearance.show_volume {
+        volume_y
+    } else {
+        buttons_top + BUTTON_SIZE.y / 2.0
+    };
+    let settings = Rect::from_center_size(
+        pos2(right - SMALL_BUTTON_SIZE.x / 2.0, settings_y),
+        SMALL_BUTTON_SIZE,
+    );
+    if button(
+        ui,
+        settings,
+        Icon::Settings,
+        &labels.settings,
+        Some(colors.secondary),
+        style,
+        &mut on_control,
+    ) {
+        command = Some(Command::OpenSettings);
     }
 
     let (title, artist) = match view.now_playing {
@@ -181,16 +350,13 @@ pub fn draw(ui: &mut Ui, view: &FlyoutView<'_>) -> Option<Command> {
     };
     // Long titles are cut with "…" instead of wrapping out of the panel.
     let text_width = pin.left() - 4.0 - left;
-    let title_rect = Rect::from_min_size(
-        pos2(left, rect.top() + MARGIN - 2.0),
-        vec2(text_width, 24.0),
-    );
+    let title_rect = Rect::from_min_size(pos2(left, top - 2.0), vec2(text_width, 24.0));
     put_left(
         ui,
         title_rect,
         // Not selectable: a selectable label takes the drags meant for
         // moving the pinned flyout.
-        egui::Label::new(RichText::new(title).size(18.0).color(Color32::WHITE))
+        egui::Label::new(RichText::new(title).size(18.0).color(colors.text))
             .truncate()
             .selectable(false),
     );
@@ -200,7 +366,7 @@ pub fn draw(ui: &mut Ui, view: &FlyoutView<'_>) -> Option<Command> {
         put_left(
             ui,
             artist_rect,
-            egui::Label::new(RichText::new(artist).size(14.0).color(SECONDARY_TEXT))
+            egui::Label::new(RichText::new(artist).size(14.0).color(colors.secondary))
                 .truncate()
                 .selectable(false),
         );
@@ -209,10 +375,11 @@ pub fn draw(ui: &mut Ui, view: &FlyoutView<'_>) -> Option<Command> {
     // The position in the track, with the time played on the left and the
     // length on the right. Left out when the player does not tell them.
     let track = view.now_playing;
-    if let Some((timeline, position)) =
-        track.and_then(|track| track.timeline.zip(track.position_at(view.now)))
+    if let Some((timeline, position)) = track
+        .filter(|_| appearance.show_position)
+        .and_then(|track| track.timeline.zip(track.position_at(view.now)))
     {
-        let y = rect.top() + MARGIN + 54.0;
+        let y = top + HEADER_HEIGHT + 10.0;
         let bar = Rect::from_min_max(
             pos2(left + BAR_LABEL_WIDTH, y - 2.0),
             pos2(right - BAR_LABEL_WIDTH, y + 2.0),
@@ -221,7 +388,7 @@ pub fn draw(ui: &mut Ui, view: &FlyoutView<'_>) -> Option<Command> {
         let value = position.as_secs_f32() / length;
         let (response, shown) = slider(ui, bar, value, &labels.position, timeline.seekable);
         on_control |= response.hovered();
-        paint_bar(&painter, bar, shown, ACCENT, &response);
+        paint_bar(&painter, bar, shown, colors.accent, &colors, &response);
         // Seek once the button is released: players stutter when asked to
         // seek on every frame of a drag.
         if response.clicked() || response.drag_stopped() {
@@ -234,14 +401,14 @@ pub fn draw(ui: &mut Ui, view: &FlyoutView<'_>) -> Option<Command> {
             Align2::LEFT_CENTER,
             format_time(played),
             font.clone(),
-            SECONDARY_TEXT,
+            colors.secondary,
         );
         painter.text(
             pos2(right, y),
             Align2::RIGHT_CENTER,
             format_time(timeline.length),
             font,
-            SECONDARY_TEXT,
+            colors.secondary,
         );
     }
 
@@ -251,35 +418,41 @@ pub fn draw(ui: &mut Ui, view: &FlyoutView<'_>) -> Option<Command> {
     // grayed out when the player cannot change them; all of them are
     // grayed out when no player is there.
     let playing = track.is_some_and(|t| t.status == PlaybackStatus::Playing);
-    let player = track.is_some().then_some(Color32::WHITE);
+    let player = track.is_some().then_some(colors.text);
     let shuffle = track.and_then(|t| t.shuffle);
     let repeat = track.and_then(|t| t.repeat);
     let toggle_color = |on: Option<bool>| match on {
-        Some(true) => Some(ACCENT),
-        Some(false) => Some(Color32::WHITE),
+        Some(true) => Some(colors.accent),
+        Some(false) => Some(colors.text),
         None => None,
     };
+    // Whether each one is a toggle (shuffle, repeat), which the settings
+    // may leave out.
     let buttons = [
         (
+            true,
             Icon::Shuffle,
             &labels.shuffle,
             toggle_color(shuffle),
             shuffle.map(|on| Command::SetShuffle(!on)),
         ),
         (
+            false,
             Icon::Previous,
             &labels.previous,
             player,
             Some(Command::Previous),
         ),
         (
+            false,
             if playing { Icon::Pause } else { Icon::Play },
             &labels.play_pause,
             player,
             Some(Command::TogglePlayPause),
         ),
-        (Icon::Next, &labels.next, player, Some(Command::Next)),
+        (false, Icon::Next, &labels.next, player, Some(Command::Next)),
         (
+            true,
             if repeat == Some(RepeatMode::Track) {
                 Icon::RepeatTrack
             } else {
@@ -290,40 +463,23 @@ pub fn draw(ui: &mut Ui, view: &FlyoutView<'_>) -> Option<Command> {
             repeat.map(|mode| Command::SetRepeat(mode.next())),
         ),
     ];
-    let buttons_top = rect.top() + MARGIN + 66.0;
-    for (i, (icon, name, color, cmd)) in buttons.into_iter().enumerate() {
+    let shown = buttons
+        .into_iter()
+        .filter(|(toggle, ..)| appearance.show_shuffle_repeat || !toggle);
+    for (i, (_, icon, name, color, cmd)) in shown.enumerate() {
         let r = Rect::from_min_size(
             pos2(left + i as f32 * (BUTTON_SIZE.x + BUTTON_GAP), buttons_top),
             BUTTON_SIZE,
         );
-        if button(ui, r, icon, name, color, &mut on_control) {
+        if button(ui, r, icon, name, color, style, &mut on_control) {
             command = cmd;
         }
     }
 
-    // The settings button at the right end of the bottom row (the top row
-    // keeps its room for the title).
-    let bottom_y = cover.bottom() - SMALL_BUTTON_SIZE.y / 2.0;
-    let settings = Rect::from_center_size(
-        pos2(right - SMALL_BUTTON_SIZE.x / 2.0, bottom_y),
-        SMALL_BUTTON_SIZE,
-    );
-    if button(
-        ui,
-        settings,
-        Icon::Settings,
-        &labels.settings,
-        Some(SECONDARY_TEXT),
-        &mut on_control,
-    ) {
-        command = Some(Command::OpenSettings);
-    }
-    let volume_right = settings.left() - 8.0;
-
     // Mute button and volume bar along the bottom, with the level on the
     // right. The volume follows the pointer while the bar is held.
-    if let Some(volume) = view.volume {
-        let y = cover.bottom() - SMALL_BUTTON_SIZE.y / 2.0;
+    if let Some(volume) = view.volume.filter(|_| appearance.show_volume) {
+        let y = volume_y;
         let mute = Rect::from_center_size(
             pos2(left + SMALL_BUTTON_SIZE.x / 2.0 - 4.0, y),
             SMALL_BUTTON_SIZE,
@@ -338,7 +494,8 @@ pub fn draw(ui: &mut Ui, view: &FlyoutView<'_>) -> Option<Command> {
             mute,
             icon,
             &labels.mute,
-            Some(SECONDARY_TEXT),
+            Some(colors.secondary),
+            style,
             &mut on_control,
         ) {
             command = Some(Command::ToggleMute);
@@ -350,11 +507,12 @@ pub fn draw(ui: &mut Ui, view: &FlyoutView<'_>) -> Option<Command> {
             .into_iter()
             .map(|text| {
                 painter
-                    .layout_no_wrap(text.to_owned(), font.clone(), SECONDARY_TEXT)
+                    .layout_no_wrap(text.to_owned(), font.clone(), colors.secondary)
                     .size()
                     .x
             })
             .fold(BAR_LABEL_WIDTH - 8.0, f32::max);
+        let volume_right = settings.left() - 8.0;
         let bar = Rect::from_min_max(
             pos2(mute.right() + 8.0, y - 3.0),
             pos2(volume_right - label_width - 12.0, y + 3.0),
@@ -362,8 +520,12 @@ pub fn draw(ui: &mut Ui, view: &FlyoutView<'_>) -> Option<Command> {
         let level = volume.level.clamp(0.0, 1.0);
         let (response, shown) = slider(ui, bar, level, &labels.volume, true);
         on_control |= response.hovered();
-        let fill = if volume.muted { VOLUME_MUTED } else { ACCENT };
-        paint_bar(&painter, bar, shown, fill, &response);
+        let fill = if volume.muted {
+            colors.muted
+        } else {
+            colors.accent
+        };
+        paint_bar(&painter, bar, shown, fill, &colors, &response);
         let shown_volume = Volume {
             level: shown,
             ..volume
@@ -383,7 +545,7 @@ pub fn draw(ui: &mut Ui, view: &FlyoutView<'_>) -> Option<Command> {
             Align2::RIGHT_CENTER,
             label,
             font,
-            SECONDARY_TEXT,
+            colors.secondary,
         );
     }
 
@@ -412,8 +574,10 @@ fn button(
     icon: Icon,
     name: &str,
     color: Option<Color32>,
+    style: ButtonStyle,
     hovered: &mut bool,
 ) -> bool {
+    let colors = &style.colors;
     let sense = if color.is_some() {
         Sense::click()
     } else {
@@ -423,21 +587,25 @@ fn button(
     *hovered |= response.hovered();
     // Screen readers (and tests) see the translated name.
     response.widget_info(|| WidgetInfo::labeled(Role::Button, color.is_some(), name));
-    // Own colors rather than egui's theme, which follows the OS (light or
-    // dark) while the panel is always dark.
     let fill = if color.is_none() {
-        BUTTON_IDLE
+        colors.button_idle
     } else if response.is_pointer_button_down_on() {
-        BUTTON_PRESSED
+        colors.button_pressed
     } else if response.hovered() {
-        BUTTON_HOVERED
+        colors.button_hovered
     } else {
-        BUTTON_IDLE
+        colors.button_idle
     };
     let painter = ui.painter();
-    painter.rect_filled(rect, CornerRadius::same(6), fill);
+    painter.rect_filled(rect, CornerRadius::same(style.corner), fill);
     let r = 7.0_f32.min(rect.height() * 0.28);
-    paint_icon(painter, icon, rect.center(), r, color.unwrap_or(DISABLED));
+    paint_icon(
+        painter,
+        icon,
+        rect.center(),
+        r,
+        color.unwrap_or(colors.disabled),
+    );
     // No tooltip: it would not fit in the small window.
     response.clicked()
 }
@@ -468,13 +636,20 @@ fn slider(ui: &mut Ui, bar: Rect, value: f32, name: &str, enabled: bool) -> (Res
 }
 
 /// Paints a bar filled up to `value`, with a knob while the pointer is on it.
-fn paint_bar(painter: &egui::Painter, bar: Rect, value: f32, fill: Color32, response: &Response) {
+fn paint_bar(
+    painter: &egui::Painter,
+    bar: Rect,
+    value: f32,
+    fill: Color32,
+    colors: &Palette,
+    response: &Response,
+) {
     let radius = CornerRadius::same((bar.height() / 2.0).round() as u8);
-    painter.rect_filled(bar, radius, BAR_TRACK);
+    painter.rect_filled(bar, radius, colors.bar_track);
     let filled = Rect::from_min_size(bar.min, vec2(bar.width() * value, bar.height()));
     painter.rect_filled(filled, radius, fill);
     if response.hovered() || response.is_pointer_button_down_on() {
-        painter.circle_filled(pos2(filled.right(), bar.center().y), 6.0, Color32::WHITE);
+        painter.circle_filled(pos2(filled.right(), bar.center().y), 6.0, colors.text);
     }
 }
 
@@ -490,12 +665,13 @@ pub fn format_time(time: Duration) -> String {
 }
 
 /// Draws the cover art into `rect`, cropped to a square around its center
-/// (video thumbnails are wide) and with rounded corners. Returns `false`
-/// for pixels that do not match the stated size, which are not drawn.
+/// (video thumbnails are wide) and with corners rounded by `corner`.
+/// Returns `false` for pixels that do not match the stated size, which are
+/// not drawn.
 ///
 /// The texture is uploaded once per cover and kept in egui's memory with
 /// the cover it was made from.
-fn paint_cover(ui: &Ui, art: &Arc<Cover>, rect: Rect) -> bool {
+fn paint_cover(ui: &Ui, art: &Arc<Cover>, rect: Rect, corner: u8) -> bool {
     let (width, height) = (art.width as usize, art.height as usize);
     if width == 0 || height == 0 || art.rgba.len() != width * height * 4 {
         return false;
@@ -525,7 +701,7 @@ fn paint_cover(ui: &Ui, art: &Arc<Cover>, rect: Rect) -> bool {
     };
     egui::Image::from_texture(&texture)
         .uv(uv)
-        .corner_radius(8)
+        .corner_radius(corner)
         .paint_at(ui, rect);
     true
 }
@@ -790,39 +966,46 @@ mod tests {
         }
     }
 
+    /// The default appearance, which shows everything.
+    static DEFAULT: std::sync::LazyLock<Appearance> = std::sync::LazyLock::new(Appearance::default);
+
     /// Draws the panel in a test harness and collects the commands.
     fn harness<'a>(
         track: &'a NowPlaying,
         labels: &'a Labels,
         now: Instant,
     ) -> Harness<'a, Vec<Command>> {
-        harness_pinned(track, labels, now, false)
+        harness_with(track, labels, now, false, &DEFAULT)
     }
 
-    /// [`harness`], pinned or not.
-    fn harness_pinned<'a>(
+    /// [`harness`], pinned or not, with the given appearance.
+    fn harness_with<'a>(
         track: &'a NowPlaying,
         labels: &'a Labels,
         now: Instant,
         pinned: bool,
+        appearance: &'a Appearance,
     ) -> Harness<'a, Vec<Command>> {
-        Harness::builder().with_size(BASE_SIZE).build_ui_state(
-            move |ui, commands: &mut Vec<Command>| {
-                let view = FlyoutView {
-                    now_playing: Some(track),
-                    volume: Some(Volume {
-                        level: 0.42,
-                        muted: false,
-                    }),
-                    pinned,
-                    now,
-                    background_opacity: 0.9,
-                    labels,
-                };
-                commands.extend(draw(ui, &view));
-            },
-            Vec::new(),
-        )
+        Harness::builder()
+            .with_size(panel_size(appearance))
+            .build_ui_state(
+                move |ui, commands: &mut Vec<Command>| {
+                    let view = FlyoutView {
+                        now_playing: Some(track),
+                        volume: Some(Volume {
+                            level: 0.42,
+                            muted: false,
+                        }),
+                        pinned,
+                        now,
+                        background_opacity: 0.9,
+                        appearance,
+                        labels,
+                    };
+                    commands.extend(draw(ui, &view));
+                },
+                Vec::new(),
+            )
     }
 
     #[test]
@@ -855,7 +1038,7 @@ mod tests {
         let track = track(now);
         let labels = labels();
         for pinned in [false, true] {
-            let mut harness = harness_pinned(&track, &labels, now, pinned);
+            let mut harness = harness_with(&track, &labels, now, pinned, &DEFAULT);
             // Right of the playback buttons: nothing but the background.
             let (from, to) = (pos2(370.0, 96.0), pos2(300.0, 130.0));
             harness.hover_at(from);
@@ -873,20 +1056,23 @@ mod tests {
     #[test]
     fn without_a_player_the_playback_buttons_do_nothing() {
         let labels = labels();
-        let mut harness = Harness::builder().with_size(BASE_SIZE).build_ui_state(
-            |ui, commands: &mut Vec<Command>| {
-                let view = FlyoutView {
-                    now_playing: None,
-                    volume: None,
-                    pinned: false,
-                    now: Instant::now(),
-                    background_opacity: 0.9,
-                    labels: &labels,
-                };
-                commands.extend(draw(ui, &view));
-            },
-            Vec::new(),
-        );
+        let mut harness = Harness::builder()
+            .with_size(panel_size(&DEFAULT))
+            .build_ui_state(
+                |ui, commands: &mut Vec<Command>| {
+                    let view = FlyoutView {
+                        now_playing: None,
+                        volume: None,
+                        pinned: false,
+                        now: Instant::now(),
+                        background_opacity: 0.9,
+                        appearance: &DEFAULT,
+                        labels: &labels,
+                    };
+                    commands.extend(draw(ui, &view));
+                },
+                Vec::new(),
+            );
         harness.get_by_label("Nothing playing");
         for name in ["Previous", "Play / pause", "Next"] {
             harness.get_by_label(name).click();
@@ -958,6 +1144,92 @@ mod tests {
         harness.get_by_label("Title");
         harness.get_by_label("Artist");
         harness.get_by_label("Position");
+    }
+
+    #[test]
+    fn the_panel_gets_smaller_without_its_parts() {
+        let all = Appearance::default();
+        assert_eq!(panel_size(&all), vec2(400.0, 164.0));
+        let without = |change: fn(&mut Appearance)| {
+            let mut appearance = all.clone();
+            change(&mut appearance);
+            panel_size(&appearance)
+        };
+        // The cover art is as tall as the content, so it narrows the panel
+        // when a row goes.
+        assert_eq!(without(|a| a.show_cover_art = false), vec2(254.0, 164.0));
+        assert_eq!(without(|a| a.show_position = false), vec2(384.0, 148.0));
+        // Without the volume row, the settings button goes after the
+        // playback buttons, which takes room unless shuffle and repeat go.
+        assert_eq!(without(|a| a.show_volume = false), vec2(398.0, 126.0));
+        let compact = |a: &mut Appearance| {
+            a.show_volume = false;
+            a.show_shuffle_repeat = false;
+        };
+        assert_eq!(without(compact), vec2(362.0, 126.0));
+        assert_eq!(without(|a| a.show_shuffle_repeat = false), panel_size(&all));
+    }
+
+    #[test]
+    fn hidden_parts_are_left_out_and_settings_stays_reachable() {
+        let now = Instant::now();
+        let track = track(now);
+        let labels = labels();
+        // Every combination of the four parts, in both themes and with
+        // square corners too: nothing may panic, the parts that are off are
+        // missing, and the settings button can still be clicked.
+        for bits in 0..32_u8 {
+            let appearance = Appearance {
+                theme: if bits & 16 == 0 {
+                    Theme::Dark
+                } else {
+                    Theme::Light
+                },
+                corner_radius: if bits % 3 == 0 { 0 } else { 32 },
+                show_cover_art: bits & 1 != 0,
+                show_position: bits & 2 != 0,
+                show_shuffle_repeat: bits & 4 != 0,
+                show_volume: bits & 8 != 0,
+                ..Appearance::default()
+            };
+            let mut harness = harness_with(&track, &labels, now, false, &appearance);
+            for (name, shown) in [
+                ("Position", appearance.show_position),
+                ("Shuffle", appearance.show_shuffle_repeat),
+                ("Repeat", appearance.show_shuffle_repeat),
+                ("Volume", appearance.show_volume),
+                ("Mute", appearance.show_volume),
+            ] {
+                let found = harness.query_by_label(name).is_some();
+                assert_eq!(found, shown, "{name} with {appearance:?}");
+            }
+            harness.get_by_label("Settings").click();
+            harness.run();
+            assert_eq!(
+                harness.state().last(),
+                Some(&Command::OpenSettings),
+                "{appearance:?}"
+            );
+            // The settings button does not cover another control.
+            let settings = harness.get_by_label("Settings").rect();
+            for name in ["Close", "Pin", "Next", "Repeat", "Volume"] {
+                if let Some(other) = harness.query_by_label(name) {
+                    assert!(
+                        !settings.intersects(other.rect()),
+                        "Settings over {name} with {appearance:?}"
+                    );
+                }
+            }
+            // Everything that is drawn lies inside the panel.
+            let size = panel_size(&appearance);
+            for name in ["Settings", "Close", "Pin", "Next"] {
+                let rect = harness.get_by_label(name).rect();
+                assert!(
+                    rect.min.x >= 0.0 && rect.max.x <= size.x && rect.max.y <= size.y,
+                    "{name} at {rect:?} with {appearance:?}"
+                );
+            }
+        }
     }
 
     #[test]

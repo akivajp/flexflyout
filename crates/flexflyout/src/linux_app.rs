@@ -11,7 +11,7 @@ use anyhow::Context as _;
 use flexflyout_core::config::{Animation, Monitor, NativeOsd};
 use flexflyout_core::layout::{self, PixelRect};
 use flexflyout_core::{Change, Command, Config};
-use flexflyout_ui::{BASE_SIZE, Labels};
+use flexflyout_ui::{Labels, panel_size};
 use smithay_client_toolkit::reexports::calloop::EventLoop;
 use smithay_client_toolkit::reexports::calloop::channel::{self, Sender};
 use smithay_client_toolkit::reexports::calloop_wayland_source::WaylandSource;
@@ -206,9 +206,10 @@ impl Host {
     /// Where the flyout goes now (it slides while fading).
     fn placement(&self, now: Instant) -> layer::Placement {
         let display = &self.state.config.display;
+        let panel = panel_size(&self.state.config.appearance);
         let size = (
-            (BASE_SIZE.x * display.scale).round() as u32,
-            (BASE_SIZE.y * display.scale).round() as u32,
+            (panel.x * display.scale).round() as u32,
+            (panel.y * display.scale).round() as u32,
         );
         let slide = match self.state.config.timing.animation {
             Animation::Slide => {

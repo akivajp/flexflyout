@@ -62,3 +62,19 @@ fade_out_ms = 400
 # "slide": also slide in from the nearest edge of the screen while fading
 # in, and back out while fading out. "fade": only fade, in place.
 animation = "slide"
+
+[appearance]
+# "dark" or "light" colors.
+theme = "dark"
+
+# Color of the bars and of the buttons that are on, as "#rrggbb".
+accent = "#5aa0ff"
+
+# Roundness of the panel's corners, from 0 (square) to 32.
+corner_radius = 14
+
+# The parts to show; the panel gets smaller without them.
+show_cover_art = true
+show_position = true
+show_shuffle_repeat = true
+show_volume = true

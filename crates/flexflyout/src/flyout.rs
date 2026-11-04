@@ -123,6 +123,7 @@ impl FlyoutState {
             pinned: self.pinned,
             now,
             background_opacity: self.config.display.opacity,
+            appearance: &self.config.appearance,
             labels: &self.labels,
         }
     }

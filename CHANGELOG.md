@@ -7,6 +7,13 @@ include breaking changes).
 
 ## [Unreleased]
 
+### Added
+- Appearance settings (`[appearance]`, and a new section in the settings
+  window): a dark or light theme, the accent color of the bars and of the
+  buttons that are on, the roundness of the corners (0 for square), and
+  whether to show the cover art, the position bar, the shuffle and repeat
+  buttons and the volume. The flyout gets smaller without them.
+
 ## [0.5.0] - 2026-11-05
 
 ### Added

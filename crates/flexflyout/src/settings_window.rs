@@ -423,6 +423,8 @@ impl SettingsWindow {
             ui.add_space(12.0);
             self.display(ui);
             ui.add_space(12.0);
+            self.appearance(ui);
+            ui.add_space(12.0);
             self.timing(ui);
             ui.add_space(16.0);
             ui.horizontal(|ui| {
@@ -622,6 +624,78 @@ impl SettingsWindow {
             &mut display.remember_drag,
             fl!(loader, "settings-remember-drag"),
         );
+    }
+
+    /// Colors, corners and the parts of the flyout to show.
+    fn appearance(&mut self, ui: &mut egui::Ui) {
+        use flexflyout_core::config::{DEFAULT_ACCENT, MAX_CORNER_RADIUS};
+        use flexflyout_core::{Appearance, Theme};
+
+        let loader = &self.loader;
+        ui.heading(fl!(loader, "settings-appearance"));
+        let appearance = &mut self.config.appearance;
+        egui::Grid::new("appearance")
+            .num_columns(2)
+            .spacing([16.0, 8.0])
+            .show(ui, |ui| {
+                ui.label(fl!(loader, "settings-theme"));
+                ui.horizontal(|ui| {
+                    ui.radio_value(
+                        &mut appearance.theme,
+                        Theme::Dark,
+                        fl!(loader, "settings-theme-dark"),
+                    );
+                    ui.radio_value(
+                        &mut appearance.theme,
+                        Theme::Light,
+                        fl!(loader, "settings-theme-light"),
+                    );
+                });
+                ui.end_row();
+
+                ui.label(fl!(loader, "settings-accent"));
+                ui.horizontal(|ui| {
+                    let (r, g, b) = appearance.accent_rgb();
+                    let mut rgb = [r, g, b];
+                    if ui.color_edit_button_srgb(&mut rgb).changed() {
+                        appearance.accent = format!("#{:02x}{:02x}{:02x}", rgb[0], rgb[1], rgb[2]);
+                    }
+                    let is_default = appearance.accent_rgb() == Appearance::default().accent_rgb();
+                    if ui
+                        .add_enabled(
+                            !is_default,
+                            egui::Button::new(fl!(loader, "settings-accent-default")),
+                        )
+                        .clicked()
+                    {
+                        appearance.accent = DEFAULT_ACCENT.to_owned();
+                    }
+                });
+                ui.end_row();
+
+                ui.label(fl!(loader, "settings-corner-radius"));
+                ui.add(
+                    egui::Slider::new(&mut appearance.corner_radius, 0..=MAX_CORNER_RADIUS)
+                        .suffix(" px"),
+                );
+                ui.end_row();
+
+                ui.label(fl!(loader, "settings-parts"));
+                ui.vertical(|ui| {
+                    for (value, id) in [
+                        (&mut appearance.show_cover_art, "settings-show-cover-art"),
+                        (&mut appearance.show_position, "settings-show-position"),
+                        (
+                            &mut appearance.show_shuffle_repeat,
+                            "settings-show-shuffle-repeat",
+                        ),
+                        (&mut appearance.show_volume, "settings-show-volume"),
+                    ] {
+                        ui.checkbox(value, loader.get(id));
+                    }
+                });
+                ui.end_row();
+            });
     }
 
     /// Fade in, display time, fade out.
