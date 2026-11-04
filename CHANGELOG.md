@@ -7,6 +7,8 @@ include breaking changes).
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-11-05
+
 ### Added
 - KDE Plasma: the `native_osd` setting now applies to Plasma's own volume
   popup. "avoid" (the default) keeps the flyout clear of where KWin puts
@@ -93,7 +95,8 @@ The first release, for Windows 11.
 - English and Japanese.
 - `flexflyout --demo` shows sample tracks.
 
-[Unreleased]: https://github.com/akivajp/flexflyout/compare/v0.3.2...HEAD
+[Unreleased]: https://github.com/akivajp/flexflyout/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/akivajp/flexflyout/compare/v0.3.2...v0.4.0
 [0.3.2]: https://github.com/akivajp/flexflyout/compare/v0.3.1...v0.3.2
 [0.3.1]: https://github.com/akivajp/flexflyout/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/akivajp/flexflyout/compare/v0.2.0...v0.3.0
