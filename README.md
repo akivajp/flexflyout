@@ -10,6 +10,8 @@
 
 A flexible, cross-platform media flyout. When you change the volume or a new track starts, it pops up with what is playing — cover art, title and artist — along with the position in the track, playback controls (including shuffle and repeat) and the volume, then fades away. Click or drag the bars to seek or set the volume. Pin the flyout to keep it on screen — and drag it wherever you like, optionally as its new usual place — or close it at once.
 
+<p align="center"><img src="docs/images/flyout-en.png" alt="The flyout: cover art, the title and artist, the position in the track, shuffle, previous, pause, next and repeat buttons, and the volume at 64%" width="448"></p>
+
 Screen sizes and monitor setups differ from desk to desk, so every part of the flyout is meant to be adjustable:
 
 - **Size** — scale the whole flyout
@@ -17,6 +19,10 @@ Screen sizes and monitor setups differ from desk to desk, so every part of the f
 - **Monitor** — the primary one, the one under the cursor, or a specific one
 - **Display time** and **opacity**
 - **The system's own volume indicator** (Windows, KDE Plasma) — keep it and place the flyout clear of it, or hide it
+
+<p align="center"><img src="docs/images/settings-en.png" alt="The settings window, with the flyout showing in the top right corner as a preview of the changes" width="640"></p>
+
+<sub>Screenshots taken on Linux with a sample track; the flyout looks the same on Windows 11.</sub>
 
 ## Platforms
 
