@@ -9,3 +9,4 @@ pub mod media;
 pub mod native_osd;
 pub mod tray;
 pub mod volume;
+pub mod web;

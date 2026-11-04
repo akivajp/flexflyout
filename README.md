@@ -96,7 +96,10 @@ Code signing of the Windows releases through the [SignPath Foundation](https://s
 
 FlexFlyout collects no telemetry. It reads what the media players report to the system (the track, its cover art and position) and the volume, and on Windows watches the volume and media keys only to know when to show the flyout (no other key is recorded or kept). Its settings and its log stay on your machine.
 
-The only network access: on Linux, when a player gives its cover art as a web address (Spotify does), FlexFlyout downloads that image from that address. On Windows it makes no network connections.
+Network access:
+
+- **The update check**: once a day, FlexFlyout asks GitHub (`api.github.com`) for the latest release, and says so in the tray menu and with a notification when a newer one is out. Nothing is downloaded or installed, and nothing about you is sent besides what any web request shows (your IP address and the app's version). Turn it off with `check_updates = false`, or "Check for new versions" in the settings window.
+- **Cover art** (Linux): when a player gives its cover art as a web address (Spotify does), FlexFlyout downloads that image from that address.
 
 ## License
 

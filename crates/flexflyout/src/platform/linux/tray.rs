@@ -2,8 +2,9 @@
 //! most other desktops show; GNOME needs an extension) and its menu, the
 //! same as on Windows.
 
-use std::sync::OnceLock;
+use std::sync::{Mutex, OnceLock, PoisonError};
 
+use flexflyout_core::update::Release;
 use ksni::blocking::TrayMethods as _;
 
 use crate::i18n::TrayLabels;
@@ -12,9 +13,14 @@ use crate::message::TrayCommand;
 /// The running icon, to change its texts.
 static HANDLE: OnceLock<ksni::blocking::Handle<Tray>> = OnceLock::new();
 
+/// A newer release offered before the icon was there.
+static UPDATE: Mutex<Option<Release>> = Mutex::new(None);
+
 /// The icon's state, read by the D-Bus service.
 struct Tray {
     labels: TrayLabels,
+    /// A newer release, offered at the top of the menu.
+    update: Option<Release>,
     on_command: Box<dyn Fn(TrayCommand) + Send + Sync>,
     icon: Vec<ksni::Icon>,
 }
@@ -23,6 +29,10 @@ struct Tray {
 pub fn spawn(labels: TrayLabels, on_command: impl Fn(TrayCommand) + Send + Sync + 'static) {
     let tray = Tray {
         labels,
+        update: UPDATE
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone(),
         on_command: Box::new(on_command),
         icon: icon(),
     };
@@ -40,6 +50,15 @@ pub fn spawn(labels: TrayLabels, on_command: impl Fn(TrayCommand) + Send + Sync 
 pub fn set_labels(labels: TrayLabels) {
     if let Some(handle) = HANDLE.get() {
         handle.update(|tray| tray.labels = labels);
+    }
+}
+
+/// Offers `release` at the top of the menu.
+pub fn offer_update(release: &Release) {
+    *UPDATE.lock().unwrap_or_else(PoisonError::into_inner) = Some(release.clone());
+    if let Some(handle) = HANDLE.get() {
+        let release = release.clone();
+        handle.update(move |tray| tray.update = Some(release));
     }
 }
 
@@ -79,7 +98,20 @@ impl ksni::Tray for Tray {
             .into()
         };
         let labels = &self.labels;
-        vec![
+        let mut menu = Vec::new();
+        if let Some(release) = &self.update {
+            let url = release.url.clone();
+            menu.push(
+                StandardItem {
+                    label: format!("{} ({})…", labels.update, release.version),
+                    activate: Box::new(move |_: &mut Self| super::desktop::open_url(&url)),
+                    ..Default::default()
+                }
+                .into(),
+            );
+            menu.push(MenuItem::Separator);
+        }
+        menu.extend([
             item(&labels.show, TrayCommand::Show),
             MenuItem::Separator,
             item(&labels.settings, TrayCommand::Settings),
@@ -98,7 +130,8 @@ impl ksni::Tray for Tray {
             .into(),
             MenuItem::Separator,
             item(&labels.quit, TrayCommand::Quit),
-        ]
+        ]);
+        menu
     }
 }
 

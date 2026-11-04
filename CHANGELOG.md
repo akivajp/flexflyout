@@ -13,6 +13,11 @@ include breaking changes).
   buttons that are on, the roundness of the corners (0 for square), and
   whether to show the cover art, the position bar, the shuffle and repeat
   buttons and the volume. The flyout gets smaller without them.
+- Update check: once a day FlexFlyout asks GitHub for the latest release,
+  and when a newer one is out, offers its page at the top of the tray menu
+  and says so once with a notification (on Windows, clicking it opens the
+  page). Nothing is downloaded or installed. `general.check_updates =
+  false` (or the setting in the window) turns it off.
 
 ## [0.5.0] - 2026-11-05
 

@@ -481,7 +481,8 @@ fn load_cover(url: &str) -> anyhow::Result<Cover> {
         anyhow::ensure!(kind.ends_with(";base64"), "not base64 data");
         base64_decode(payload).context("broken base64 data")?
     } else if url.starts_with("https://") || url.starts_with("http://") {
-        // The only network access: the cover art the player itself names.
+        // The cover art the player itself names (besides the update check,
+        // the only network access).
         let agent = ureq::Agent::config_builder()
             .timeout_global(Some(Duration::from_secs(10)))
             .build()

@@ -21,6 +21,10 @@ tray-start-with-windows = Windows の起動時に開始
 tray-start-at-login = ログイン時に開始
 tray-quit = 終了
 tray-settings = 設定…
+tray-update = 新しい版を入手
+update-notice-title = FlexFlyout { $version } が出ました
+update-notice-body-windows = ここをクリックするか、タスクトレイのメニューの「新しい版を入手」から、ページを開けます。
+update-notice-body = タスクトレイのメニューの「新しい版を入手」から、ページを開けます。
 
 # 設定ウィンドウ。
 settings-title = FlexFlyout の設定
@@ -36,6 +40,7 @@ settings-native-osd-keep = 残して、重なっても気にしない
 settings-native-osd-kde = Plasma の音量表示
 settings-native-osd-hide-kde = 消す（音量の表示だけ）
 settings-show-on-play-pause = 再生・一時停止したときにも表示する
+settings-check-updates = 新しい版が出たか確認する（1日1回、GitHub に問い合わせる）
 settings-start-with-windows = Windows の起動時に開始する
 settings-start-at-login = ログイン時に開始する
 settings-display = 表示

@@ -54,6 +54,8 @@ pub struct TrayLabels {
     pub autostart: String,
     /// End the app.
     pub quit: String,
+    /// Open the page of a newer release (followed by its version).
+    pub update: String,
 }
 
 /// Texts of the tray menu in the loaded language.
@@ -69,6 +71,7 @@ pub fn tray_labels(loader: &FluentLanguageLoader) -> TrayLabels {
         #[cfg(not(windows))]
         autostart: fl!(loader, "tray-start-at-login"),
         quit: fl!(loader, "tray-quit"),
+        update: fl!(loader, "tray-update"),
     }
 }
 

@@ -379,6 +379,7 @@ fn watch_settings(
     let show_on_play_pause = Arc::clone(show_on_play_pause);
     crate::settings::watch(options.config_file.clone(), move |config| {
         show_on_play_pause.store(config.general.show_on_play_pause, Ordering::Relaxed);
+        crate::update::set_enabled(config.general.check_updates);
         let new_language = crate::settings::language(lang.as_deref(), &config);
         let labels = if new_language != language {
             // A bad language code keeps the texts in use.

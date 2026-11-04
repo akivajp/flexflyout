@@ -510,6 +510,10 @@ impl SettingsWindow {
             &mut self.config.general.show_on_play_pause,
             fl!(loader, "settings-show-on-play-pause"),
         );
+        ui.checkbox(
+            &mut self.config.general.check_updates,
+            fl!(loader, "settings-check-updates"),
+        );
         let mut autostart = self.autostart;
         if ui
             .checkbox(&mut autostart, autostart_label(loader))

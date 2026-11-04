@@ -11,6 +11,7 @@ use std::time::{Duration, Instant};
 pub mod config;
 pub mod layout;
 mod timer;
+pub mod update;
 
 pub use config::{Appearance, Config, Theme};
 pub use timer::{FlyoutTimer, Timing};

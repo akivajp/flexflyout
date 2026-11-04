@@ -104,6 +104,36 @@ fn quote(argument: &str) -> String {
     quoted
 }
 
+/// Shows a desktop notification (org.freedesktop.Notifications, which KDE
+/// Plasma, GNOME and most others provide).
+pub fn notify(summary: &str, body: &str) {
+    let result = (|| -> zbus::Result<()> {
+        let connection = zbus::blocking::Connection::session()?;
+        let hints = std::collections::HashMap::<&str, zbus::zvariant::Value<'_>>::new();
+        connection.call_method(
+            Some("org.freedesktop.Notifications"),
+            "/org/freedesktop/Notifications",
+            Some("org.freedesktop.Notifications"),
+            "Notify",
+            &(
+                "FlexFlyout",
+                0u32,
+                "flexflyout",
+                summary,
+                body,
+                Vec::<&str>::new(),
+                hints,
+                // The server's default time.
+                -1i32,
+            ),
+        )?;
+        Ok(())
+    })();
+    if let Err(err) = result {
+        log::warn!("cannot show a notification: {err}");
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

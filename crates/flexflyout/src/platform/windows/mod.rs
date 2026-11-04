@@ -8,4 +8,5 @@ pub mod monitor;
 pub mod native_osd;
 pub mod tray;
 pub mod volume;
+pub mod web;
 pub mod window;

@@ -23,6 +23,11 @@ native_osd = "avoid"
 # volume change and the media keys always show it).
 show_on_play_pause = true
 
+# Ask GitHub (api.github.com) once a day whether a newer version is out, and
+# say so in the tray menu and with a notification. Nothing is downloaded or
+# installed, and nothing about you is sent.
+check_updates = true
+
 [display]
 # Monitor to show the flyout on: "primary", "cursor" (the one the mouse
 # pointer is on) or a number from 1. A missing number means the primary one.

@@ -126,6 +126,9 @@ pub struct General {
     /// Whether the flyout also shows when the player starts or pauses
     /// (besides a new track, a volume change and the keys).
     pub show_on_play_pause: bool,
+    /// Whether to ask GitHub once a day for a newer release (and say so in
+    /// the tray menu and with a notification).
+    pub check_updates: bool,
 }
 
 impl Default for General {
@@ -134,6 +137,7 @@ impl Default for General {
             language: "auto".to_owned(),
             native_osd: NativeOsd::default(),
             show_on_play_pause: true,
+            check_updates: true,
         }
     }
 }

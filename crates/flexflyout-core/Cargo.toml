@@ -13,6 +13,8 @@ publish = false
 [dependencies]
 serde = { version = "1.0.229", features = ["derive"] }
 serde_ignored = "0.1.14"
+# GitHub's answer about the latest release.
+serde_json = "1"
 toml = "1.1.8"
 toml_edit = { version = "0.25.17", default-features = false, features = ["parse", "display"] }
 

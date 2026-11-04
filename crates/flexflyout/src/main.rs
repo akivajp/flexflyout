@@ -15,6 +15,8 @@ mod flyout;
 mod i18n;
 mod message;
 mod settings;
+#[cfg(any(windows, target_os = "linux"))]
+mod update;
 
 #[cfg(windows)]
 mod app;
@@ -75,6 +77,11 @@ struct Cli {
     /// Win32 (to compare how long showing a hidden window takes).
     #[arg(long, hide = true, requires = "demo")]
     show_via_egui: bool,
+
+    /// Check for a newer version a few seconds after the start, as if this
+    /// version were running (to try the update notice).
+    #[arg(long, hide = true, value_name = "VERSION")]
+    check_update_as: Option<String>,
 }
 
 fn main() -> ExitCode {
@@ -117,6 +124,8 @@ fn run(cli: Cli) -> anyhow::Result<()> {
     if cli.settings {
         return settings_window::run(config_file, cli.lang);
     }
+    #[cfg(any(windows, target_os = "linux"))]
+    start_update_check(&cli, &config);
     #[cfg(windows)]
     {
         app::run(
@@ -151,10 +160,64 @@ fn run(cli: Cli) -> anyhow::Result<()> {
     }
 }
 
+/// Starts looking for a newer release (not in the demo, which is for
+/// trying the flyout, unless asked to with `--check-update-as`).
+#[cfg(any(windows, target_os = "linux"))]
+fn start_update_check(cli: &Cli, config: &flexflyout_core::Config) {
+    use i18n_embed_fl::fl;
+
+    let (current, first_check) = match &cli.check_update_as {
+        Some(version) => (version.clone(), std::time::Duration::from_secs(3)),
+        None if cli.demo => return,
+        None => (env!("CARGO_PKG_VERSION").to_owned(), update::FIRST_CHECK),
+    };
+    // The notice is in the language at the start.
+    let loader = match i18n::load(settings::language(cli.lang.as_deref(), config).as_deref()) {
+        Ok(loader) => loader,
+        Err(err) => {
+            log::error!("{err:#}");
+            return;
+        }
+    };
+    #[cfg(windows)]
+    let fetch = platform::windows::web::get;
+    #[cfg(target_os = "linux")]
+    let fetch = platform::linux::web::get;
+    update::spawn(
+        config.general.check_updates,
+        current,
+        first_check,
+        fetch,
+        move |release, news| {
+            let notice = news.then(|| {
+                let title = fl!(
+                    loader,
+                    "update-notice-title",
+                    version = release.version.as_str()
+                );
+                #[cfg(windows)]
+                let body = fl!(loader, "update-notice-body-windows");
+                #[cfg(not(windows))]
+                let body = fl!(loader, "update-notice-body");
+                (title, body)
+            });
+            #[cfg(windows)]
+            platform::windows::tray::offer_update(release, notice);
+            #[cfg(target_os = "linux")]
+            {
+                platform::linux::tray::offer_update(release);
+                if let Some((title, body)) = notice {
+                    platform::linux::desktop::notify(&title, &body);
+                }
+            }
+        },
+    );
+}
+
 /// Default folder of the logs: next to the other per-user data of the app.
 /// `%LOCALAPPDATA%` on Windows, `$XDG_STATE_HOME` (or `~/.local/state`)
 /// elsewhere.
-fn default_log_dir() -> PathBuf {
+pub(crate) fn default_log_dir() -> PathBuf {
     let base = std::env::var_os("LOCALAPPDATA")
         .or_else(|| std::env::var_os("XDG_STATE_HOME").filter(|dir| !dir.is_empty()))
         .map(PathBuf::from)

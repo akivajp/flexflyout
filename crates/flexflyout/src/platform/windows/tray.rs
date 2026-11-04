@@ -13,8 +13,9 @@ use anyhow::Context as _;
 use windows::Win32::Foundation::{HINSTANCE, HWND, LPARAM, LRESULT, POINT, WPARAM};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::Shell::{
-    ASSOCF_INIT_IGNOREUNKNOWN, ASSOCSTR_EXECUTABLE, AssocQueryStringW, NIF_ICON, NIF_MESSAGE,
-    NIF_TIP, NIM_ADD, NIM_DELETE, NOTIFYICONDATAW, Shell_NotifyIconW, ShellExecuteW,
+    ASSOCF_INIT_IGNOREUNKNOWN, ASSOCSTR_EXECUTABLE, AssocQueryStringW, NIF_ICON, NIF_INFO,
+    NIF_MESSAGE, NIF_TIP, NIIF_INFO, NIM_ADD, NIM_DELETE, NIM_MODIFY, NIN_BALLOONUSERCLICK,
+    NOTIFYICONDATAW, Shell_NotifyIconW, ShellExecuteW,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     AppendMenuW, CreateIcon, CreatePopupMenu, CreateWindowExW, DefWindowProcW, DestroyMenu,
@@ -26,6 +27,8 @@ use windows::Win32::UI::WindowsAndMessaging::{
     WM_RBUTTONUP, WNDCLASSW,
 };
 use windows::core::{HSTRING, PCWSTR, w};
+
+use flexflyout_core::update::Release;
 
 use crate::i18n::TrayLabels;
 
@@ -43,6 +46,12 @@ const MENU: [(usize, Option<TrayCommand>); 9] = [
     (0, None),
     (4, Some(TrayCommand::Quit)),
 ];
+
+/// The command ID of the menu item that opens a newer release's page.
+const UPDATE_ID: usize = 7;
+
+/// A newer release, offered at the top of the menu.
+static UPDATE: Mutex<Option<Release>> = Mutex::new(None);
 
 /// The message the icon sends to the window.
 const WM_TRAY: u32 = WM_APP + 1;
@@ -86,6 +95,45 @@ pub fn spawn(labels: TrayLabels, on_command: impl Fn(TrayCommand) + Send + Sync 
 pub fn set_labels(labels: TrayLabels) {
     if let Some(tray) = TRAY.get() {
         *tray.labels.lock().unwrap_or_else(PoisonError::into_inner) = labels;
+    }
+}
+
+/// Offers `release` at the top of the menu, and shows `notice` (a title
+/// and a text) as a notification; a click on it opens the release's page.
+pub fn offer_update(release: &Release, notice: Option<(String, String)>) {
+    *UPDATE.lock().unwrap_or_else(PoisonError::into_inner) = Some(release.clone());
+    let hwnd = WINDOW.load(Ordering::Acquire);
+    let Some((title, text)) = notice.filter(|_| hwnd != 0) else {
+        return;
+    };
+    let mut data = icon_data(HWND(hwnd as *mut _));
+    data.uFlags = NIF_INFO;
+    data.dwInfoFlags = NIIF_INFO;
+    // Cut to the fixed buffers, keeping the terminating zero.
+    let copy = |slot: &mut [u16], text: &str| {
+        let len = slot.len() - 1;
+        for (slot, unit) in slot[..len].iter_mut().zip(text.encode_utf16()) {
+            *slot = unit;
+        }
+    };
+    copy(&mut data.szInfoTitle, &title);
+    copy(&mut data.szInfo, &text);
+    // SAFETY: modifies our own icon; callable from any thread.
+    if !unsafe { Shell_NotifyIconW(NIM_MODIFY, &data) }.as_bool() {
+        log::warn!("cannot show the notification");
+    }
+}
+
+/// Opens the page of the release on offer, if any.
+fn open_update() {
+    let url = UPDATE
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .as_ref()
+        .map(|release| release.url.clone());
+    if let Some(url) = url {
+        log::info!("tray: opening {url}");
+        open_url(&url);
     }
 }
 
@@ -236,6 +284,7 @@ unsafe extern "system" fn window_proc(
         match lparam.0 as u32 {
             WM_LBUTTONUP => carry_out(TrayCommand::Show),
             WM_RBUTTONUP | WM_CONTEXTMENU => show_menu(hwnd),
+            NIN_BALLOONUSERCLICK => open_update(),
             _ => {}
         }
         return LRESULT(0);
@@ -273,6 +322,16 @@ fn show_menu(hwnd: HWND) {
         let Ok(menu) = CreatePopupMenu() else {
             return;
         };
+        let update = UPDATE
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .as_ref()
+            .map(|release| release.version.clone());
+        if let Some(version) = update {
+            let label = HSTRING::from(format!("{} ({version})…", labels.update));
+            let _ = AppendMenuW(menu, MF_STRING, UPDATE_ID, &label);
+            let _ = AppendMenuW(menu, MF_SEPARATOR, 0, PCWSTR::null());
+        }
         for (id, command) in MENU {
             let _ = match command {
                 Some(command) => {
@@ -305,7 +364,11 @@ fn show_menu(hwnd: HWND) {
         let _ = PostMessageW(Some(hwnd), WM_NULL, WPARAM(0), LPARAM(0));
         let _ = DestroyMenu(menu);
         let chosen = chosen.0 as usize;
-        if let Some((_, Some(command))) = MENU.iter().find(|(id, _)| *id == chosen && chosen != 0) {
+        if chosen == UPDATE_ID {
+            open_update();
+        } else if let Some((_, Some(command))) =
+            MENU.iter().find(|(id, _)| *id == chosen && chosen != 0)
+        {
             carry_out(*command);
         }
     }

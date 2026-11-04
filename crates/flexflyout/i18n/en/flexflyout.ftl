@@ -21,6 +21,10 @@ tray-start-with-windows = Start with Windows
 tray-start-at-login = Start at login
 tray-quit = Quit
 tray-settings = Settings…
+tray-update = Get the new version
+update-notice-title = FlexFlyout { $version } is out
+update-notice-body-windows = Click here, or choose "Get the new version" in the tray menu, to open its page.
+update-notice-body = Choose "Get the new version" in the tray menu to open its page.
 
 # The settings window.
 settings-title = FlexFlyout settings
@@ -36,6 +40,7 @@ settings-native-osd-keep = Keep it and ignore it
 settings-native-osd-kde = Plasma volume popup
 settings-native-osd-hide-kde = Hide it (the volume popup only)
 settings-show-on-play-pause = Also show when playback starts or pauses
+settings-check-updates = Check for new versions (asks GitHub once a day)
 settings-start-with-windows = Start with Windows
 settings-start-at-login = Start at login
 settings-display = Display
