@@ -250,6 +250,39 @@ pub(crate) fn default_log_dir() -> PathBuf {
     base.join("flexflyout")
 }
 
+/// The log without the chatter of the D-Bus library (zbus, also behind the
+/// tray icon's ksni), which writes every step of a connection at the info
+/// level, some of it through the spans of `tracing` (logged under
+/// `tracing::span`, which nothing else here uses): only its warnings and
+/// errors are kept.
+struct Quieter(Box<dyn log::Log>);
+
+impl Quieter {
+    /// Whether a record from `target` at `level` is worth a line.
+    fn wanted(level: log::Level, target: &str) -> bool {
+        level <= log::Level::Warn
+            || !["zbus", "ksni", "tracing::span"]
+                .iter()
+                .any(|chatty| target.starts_with(chatty))
+    }
+}
+
+impl log::Log for Quieter {
+    fn enabled(&self, metadata: &log::Metadata<'_>) -> bool {
+        Self::wanted(metadata.level(), metadata.target()) && self.0.enabled(metadata)
+    }
+
+    fn log(&self, record: &log::Record<'_>) {
+        if Self::wanted(record.level(), record.target()) {
+            self.0.log(record);
+        }
+    }
+
+    fn flush(&self) {
+        self.0.flush();
+    }
+}
+
 /// Writes the log to `path` (overwritten on every start) and logs panics,
 /// which would otherwise vanish in a GUI-subsystem process.
 fn init_logging(path: &std::path::Path) -> anyhow::Result<()> {
@@ -265,7 +298,9 @@ fn init_logging(path: &std::path::Path) -> anyhow::Result<()> {
         .set_time_offset_to_local()
         .unwrap_or_else(|builder| builder)
         .build();
-    simplelog::WriteLogger::init(log::LevelFilter::Info, config, file)?;
+    let logger = simplelog::WriteLogger::new(log::LevelFilter::Info, config, file);
+    log::set_boxed_logger(Box::new(Quieter(logger)))?;
+    log::set_max_level(log::LevelFilter::Info);
 
     let default_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
@@ -282,4 +317,20 @@ fn init_logging(path: &std::path::Path) -> anyhow::Result<()> {
         default_hook(info);
     }));
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_d_bus_chatter_stays_out_of_the_log() {
+        use log::Level;
+        assert!(!Quieter::wanted(Level::Info, "zbus::connection::handshake"));
+        assert!(!Quieter::wanted(Level::Info, "ksni::service"));
+        assert!(!Quieter::wanted(Level::Info, "tracing::span"));
+        // Its problems still count, and so does everything else.
+        assert!(Quieter::wanted(Level::Warn, "zbus::connection"));
+        assert!(Quieter::wanted(Level::Info, "flexflyout::settings"));
+    }
 }
