@@ -28,6 +28,9 @@ include breaking changes).
   Ctrl+C) left Plasma's volume popup hidden, with `native_osd = "hide"`,
   until FlexFlyout started again. It now closes as Quit in the tray menu
   does, and brings the popup back.
+- The update check tried again only a day later when it got no answer
+  (no network yet after the start, say). It now tries again within an
+  hour.
 
 ## [0.6.0] - 2026-11-05
 

@@ -17,7 +17,8 @@ pub const FIRST_CHECK: Duration = Duration::from_secs(60);
 /// How often to check.
 const INTERVAL: Duration = Duration::from_secs(24 * 60 * 60);
 /// How often the thread wakes up to see whether a check is due (and
-/// whether checking was turned on).
+/// whether checking was turned on). A check that got no answer (offline)
+/// is tried again then, rather than a day later.
 const WAKE: Duration = Duration::from_secs(60 * 60);
 
 /// Follows the setting.
@@ -42,18 +43,24 @@ pub fn spawn(
         .name("update".into())
         .spawn(move || {
             std::thread::sleep(first_check);
+            // When GitHub last answered.
             let mut last: Option<SystemTime> = None;
             let mut offered: Option<String> = None;
             loop {
                 // The wall clock, which also runs while the PC sleeps.
-                let due = last.is_none_or(|time| time.elapsed().is_ok_and(|e| e >= INTERVAL));
-                if ENABLED.load(Ordering::Relaxed) && due {
-                    last = Some(SystemTime::now());
-                    if let Some(release) = check(&current, fetch)
-                        && offered.as_deref() != Some(release.version.as_str())
-                    {
-                        found(&release, remember(&release.version));
-                        offered = Some(release.version);
+                let now = SystemTime::now();
+                if ENABLED.load(Ordering::Relaxed) && is_due(last, now) {
+                    match check(&current, fetch) {
+                        Checked::Newer(release) => {
+                            last = Some(now);
+                            if offered.as_deref() != Some(release.version.as_str()) {
+                                found(&release, remember(&release.version));
+                                offered = Some(release.version);
+                            }
+                        }
+                        Checked::UpToDate => last = Some(now),
+                        // Offline, most likely: again at the next wake.
+                        Checked::NoAnswer => {}
                     }
                 }
                 std::thread::sleep(WAKE);
@@ -64,20 +71,35 @@ pub fn spawn(
     }
 }
 
-/// Asks for the latest release; returns it when it is newer than
-/// `current`.
-fn check(current: &str, fetch: fn(&str) -> anyhow::Result<String>) -> Option<Release> {
+/// Whether a check is due at `now`, when GitHub last answered at `last`:
+/// never answered yet, a day later, or the clock was set back past it.
+fn is_due(last: Option<SystemTime>, now: SystemTime) -> bool {
+    last.is_none_or(|last| !now.duration_since(last).is_ok_and(|since| since < INTERVAL))
+}
+
+/// What a check found out.
+#[derive(Debug)]
+enum Checked {
+    /// A newer version is out.
+    Newer(Release),
+    /// The latest release is this one (or older).
+    UpToDate,
+    /// No usable answer (offline, or an error from GitHub).
+    NoAnswer,
+}
+
+/// Asks for the latest release, and compares it with `current`.
+fn check(current: &str, fetch: fn(&str) -> anyhow::Result<String>) -> Checked {
     let answer = match fetch(LATEST_RELEASE_URL) {
         Ok(answer) => answer,
-        // Offline, most likely: try again at the next check.
         Err(err) => {
             log::info!("cannot check for a newer version: {err:#}");
-            return None;
+            return Checked::NoAnswer;
         }
     };
     let Some(release) = update::parse_latest(&answer) else {
         log::warn!("unexpected answer about the latest release");
-        return None;
+        return Checked::NoAnswer;
     };
     if update::is_newer(current, &release.version) {
         log::info!(
@@ -85,10 +107,10 @@ fn check(current: &str, fetch: fn(&str) -> anyhow::Result<String>) -> Option<Rel
             release.version,
             release.url
         );
-        Some(release)
+        Checked::Newer(release)
     } else {
         log::info!("up to date (the latest release is {})", release.version);
-        None
+        Checked::UpToDate
     }
 }
 
@@ -116,4 +138,36 @@ fn notified_file() -> PathBuf {
 /// The `User-Agent` of the requests (GitHub's API requires one).
 pub fn user_agent() -> String {
     format!("FlexFlyout/{}", env!("CARGO_PKG_VERSION"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn checks_are_due_daily_after_an_answer() {
+        let answered = SystemTime::UNIX_EPOCH + Duration::from_secs(1_800_000_000);
+        // Never answered (also after a check that got no answer).
+        assert!(is_due(None, answered));
+        // Answered: not again within a day.
+        assert!(!is_due(Some(answered), answered));
+        assert!(!is_due(Some(answered), answered + INTERVAL - WAKE));
+        assert!(is_due(Some(answered), answered + INTERVAL));
+        // The clock was set back past the answer: check rather than wait.
+        assert!(is_due(Some(answered), answered - WAKE));
+    }
+
+    #[test]
+    fn a_check_without_an_answer_is_not_an_answer() {
+        let offline: fn(&str) -> anyhow::Result<String> = |_| anyhow::bail!("offline");
+        assert!(matches!(check("0.6.0", offline), Checked::NoAnswer));
+        let limited: fn(&str) -> anyhow::Result<String> =
+            |_| Ok(r#"{"message":"API rate limit exceeded"}"#.into());
+        assert!(matches!(check("0.6.0", limited), Checked::NoAnswer));
+        let latest: fn(&str) -> anyhow::Result<String> = |_| {
+            Ok(r#"{"tag_name":"v0.7.0","html_url":"https://github.com/akivajp/flexflyout/releases/tag/v0.7.0"}"#.into())
+        };
+        assert!(matches!(check("0.7.0", latest), Checked::UpToDate));
+        assert!(matches!(check("0.6.0", latest), Checked::Newer(_)));
+    }
 }
