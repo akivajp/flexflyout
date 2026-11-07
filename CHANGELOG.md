@@ -36,6 +36,10 @@ include breaking changes).
   connects again.
 - Linux: the volume bar set every channel to the same level, losing the
   balance between left and right. It now keeps it.
+- Linux: cover art given as a web address (Spotify) held up the flyout of
+  a new track, and the controls, until it was downloaded: up to ten
+  seconds on a slow network. The track now shows at once, and its cover
+  art follows.
 - Linux: ending FlexFlyout with a signal (at logout, or with `kill` or
   Ctrl+C) left Plasma's volume popup hidden, with `native_osd = "hide"`,
   until FlexFlyout started again. It now closes as Quit in the tray menu

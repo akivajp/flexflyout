@@ -7,6 +7,10 @@
 //!
 //! The current player is the one that last started playing; while none
 //! plays, the one shown before stays, else any.
+//!
+//! Cover art given as a web address (Spotify) is downloaded on a thread of
+//! its own, and joins the track when it arrives: a slow or unreachable
+//! server never holds up a new track's flyout or the controls.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -48,6 +52,9 @@ enum Request {
     Players,
     /// A control of the flyout was used.
     Command(Command),
+    /// The cover art at this web address was downloaded (`None`: it could
+    /// not be).
+    Cover(String, Option<Arc<Cover>>),
 }
 
 /// Sends the flyout's controls to the current player.
@@ -131,7 +138,7 @@ fn run(
         |_| Request::Players,
     );
 
-    let mut covers = CoverCache::default();
+    let mut covers = CoverCache::new(requests.clone());
     let mut active: Option<String> = None;
     let mut current = choose(&connection, None, None);
     let mut track = current.as_ref().and_then(|c| read_track(c, &mut covers));
@@ -154,6 +161,12 @@ fn run(
                     changed = true;
                 }
                 Request::Players => changed = true,
+                Request::Cover(url, cover) => {
+                    // Read the track again, now with its cover art.
+                    if covers.finish(url, cover) {
+                        changed = true;
+                    }
+                }
                 Request::Command(command) => {
                     if let Some(current) = &current {
                         send_command(current, command, track.as_ref());
@@ -445,27 +458,78 @@ fn send_command(current: &Current, command: Command, track: Option<&NowPlaying>)
 
 /// The cover art of the last track, by its URL, so that a player that
 /// repeats its properties does not make it load again.
-#[derive(Default)]
 struct CoverCache {
     last: Option<(String, Option<Arc<Cover>>)>,
+    /// The web address being downloaded, if any.
+    loading: Option<String>,
+    /// Where a download reports back: the media thread.
+    requests: Sender<Request>,
 }
 
 impl CoverCache {
-    /// The cover art at `url` (a file, a `data:` URL as mpv gives it, or
-    /// https as Spotify gives it).
+    /// An empty cache whose downloads report to `requests`.
+    fn new(requests: Sender<Request>) -> Self {
+        Self {
+            last: None,
+            loading: None,
+            requests,
+        }
+    }
+
+    /// The cover art at `url` (a file, a `data:` URL as mpv gives it, or a
+    /// web address as Spotify gives it), if it is there. A web address
+    /// starts a download and gives `None` until [`Self::finish`] has its
+    /// result.
     fn get(&mut self, url: &str) -> Option<Arc<Cover>> {
         if let Some((known, cover)) = &self.last
             && known == url
         {
             return cover.clone();
         }
-        let cover = load_cover(url)
-            .inspect_err(|err| log::warn!("cannot read the cover art at {url}: {err:#}"))
-            .ok()
-            .map(Arc::new);
-        self.last = Some((url.to_owned(), cover.clone()));
-        cover
+        if !is_web(url) {
+            let cover = load_logged(url);
+            self.last = Some((url.to_owned(), cover.clone()));
+            return cover;
+        }
+        if self.loading.as_deref() != Some(url) {
+            let (address, requests) = (url.to_owned(), self.requests.clone());
+            let spawned = std::thread::Builder::new()
+                .name("cover".into())
+                .spawn(move || {
+                    let cover = load_logged(&address);
+                    let _ = requests.send(Request::Cover(address, cover));
+                });
+            match spawned {
+                Ok(_) => self.loading = Some(url.to_owned()),
+                Err(err) => log::warn!("cannot download the cover art: {err}"),
+            }
+        }
+        None
     }
+
+    /// Takes in a downloaded cover art. Returns whether it is the one
+    /// wanted (not one of a track that has passed meanwhile).
+    fn finish(&mut self, url: String, cover: Option<Arc<Cover>>) -> bool {
+        if self.loading.as_deref() != Some(url.as_str()) {
+            return false;
+        }
+        self.loading = None;
+        self.last = Some((url, cover));
+        true
+    }
+}
+
+/// Whether the cover art is a web address, to be downloaded on the side.
+fn is_web(url: &str) -> bool {
+    url.starts_with("https://") || url.starts_with("http://")
+}
+
+/// [`load_cover`], with a failure logged.
+fn load_logged(url: &str) -> Option<Arc<Cover>> {
+    load_cover(url)
+        .inspect_err(|err| log::warn!("cannot read the cover art at {url}: {err:#}"))
+        .ok()
+        .map(Arc::new)
 }
 
 /// Reads and decodes cover art, and scales it down.
@@ -480,7 +544,7 @@ fn load_cover(url: &str) -> anyhow::Result<Cover> {
         let (kind, payload) = data.split_once(',').context("not a data URL")?;
         anyhow::ensure!(kind.ends_with(";base64"), "not base64 data");
         base64_decode(payload).context("broken base64 data")?
-    } else if url.starts_with("https://") || url.starts_with("http://") {
+    } else if is_web(url) {
         // The cover art the player itself names (besides the update check,
         // the only network access).
         let agent = ureq::Agent::config_builder()
@@ -587,6 +651,61 @@ mod tests {
             Some(&b"hello!!"[..])
         );
         assert_eq!(base64_decode("a*b"), None);
+    }
+
+    /// Serves `body` as an image on a local port to every request, and
+    /// counts them. Returns its address and the count.
+    fn serve(body: Vec<u8>) -> (String, Arc<std::sync::atomic::AtomicUsize>) {
+        use std::io::{Read as _, Write as _};
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = format!("http://{}/cover.png", listener.local_addr().unwrap());
+        let hits = Arc::new(AtomicUsize::new(0));
+        let counted = Arc::clone(&hits);
+        std::thread::spawn(move || {
+            for mut stream in listener.incoming().flatten() {
+                counted.fetch_add(1, Ordering::SeqCst);
+                let mut request = [0u8; 2048];
+                let _ = stream.read(&mut request);
+                let _ = write!(
+                    stream,
+                    "HTTP/1.1 200 OK\r\nContent-Type: image/png\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                    body.len()
+                );
+                let _ = stream.write_all(&body);
+            }
+        });
+        (address, hits)
+    }
+
+    /// A PNG image of `width` × `height` pixels.
+    fn png(width: u32, height: u32) -> Vec<u8> {
+        let image = image::RgbaImage::from_pixel(width, height, image::Rgba([10, 20, 30, 255]));
+        let mut bytes = std::io::Cursor::new(Vec::new());
+        image.write_to(&mut bytes, image::ImageFormat::Png).unwrap();
+        bytes.into_inner()
+    }
+
+    #[test]
+    fn web_cover_art_arrives_later_and_is_downloaded_once() {
+        let (address, hits) = serve(png(4, 3));
+        let (requests, received) = channel();
+        let mut covers = CoverCache::new(requests);
+        // Not there yet: the track shows without it, and looking again
+        // does not download it again.
+        assert!(covers.get(&address).is_none());
+        assert!(covers.get(&address).is_none());
+        let Ok(Request::Cover(url, cover)) = received.recv_timeout(Duration::from_secs(10)) else {
+            panic!("no cover art came");
+        };
+        assert_eq!(url, address);
+        assert!(covers.finish(url, cover));
+        let cover = covers.get(&address).expect("the cover art");
+        assert_eq!((cover.width, cover.height), (4, 3));
+        assert_eq!(hits.load(std::sync::atomic::Ordering::SeqCst), 1);
+        // The art of a track that has passed meanwhile is not taken.
+        assert!(!covers.finish("http://127.0.0.1:9/passed.png".into(), None));
+        assert!(covers.get(&address).is_some());
     }
 
     #[test]
