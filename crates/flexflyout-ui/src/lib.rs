@@ -187,6 +187,12 @@ const BUTTON_GAP: f32 = 6.0;
 const SMALL_BUTTON_SIZE: egui::Vec2 = vec2(28.0, 24.0);
 /// Width kept for a time or the percentage next to a bar.
 const BAR_LABEL_WIDTH: f32 = 40.0;
+/// Volume change for one step of the mouse wheel over the volume bar (a
+/// notch of most wheels; Windows' volume keys change it by as much).
+const WHEEL_STEP: f32 = 0.02;
+/// Scrolling, in points, that makes one step when a device scrolls by
+/// points (touchpads): what egui makes of one notch of a wheel.
+const POINTS_PER_STEP: f32 = 40.0;
 
 /// Top of the playback buttons, from the top of the content.
 fn buttons_top(appearance: &Appearance) -> f32 {
@@ -535,6 +541,13 @@ pub fn draw(ui: &mut Ui, view: &FlyoutView<'_>) -> Option<Command> {
         {
             command = Some(Command::SetVolume(shown));
         }
+        // The wheel over the bar changes the volume step by step, up for
+        // louder, to whole percents.
+        let steps = wheel_steps(ui, &response);
+        if steps != 0 {
+            let stepped = (level + steps as f32 * WHEEL_STEP).clamp(0.0, 1.0);
+            command = Some(Command::SetVolume((stepped * 100.0).round() / 100.0));
+        }
         let label = if volume.muted {
             labels.muted.clone()
         } else {
@@ -633,6 +646,37 @@ fn slider(ui: &mut Ui, bar: Rect, value: f32, name: &str, enabled: bool) -> (Res
         _ => value.clamp(0.0, 1.0),
     };
     (response, shown)
+}
+
+/// Whole steps the mouse wheel turned over `response` in this frame:
+/// positive when turned up (away from the user). Fractions of a step (from
+/// high-resolution wheels and touchpads) add up while the pointer stays.
+fn wheel_steps(ui: &Ui, response: &Response) -> i32 {
+    let id = response.id.with("wheel");
+    if !response.contains_pointer() {
+        ui.data_mut(|data| data.remove::<f32>(id));
+        return 0;
+    }
+    let turned: f32 = ui.input(|input| {
+        input
+            .events
+            .iter()
+            .map(|event| match event {
+                egui::Event::MouseWheel { unit, delta, .. } => match unit {
+                    egui::MouseWheelUnit::Point => delta.y / POINTS_PER_STEP,
+                    egui::MouseWheelUnit::Line | egui::MouseWheelUnit::Page => delta.y,
+                },
+                _ => 0.0,
+            })
+            .sum()
+    });
+    if turned == 0.0 {
+        return 0;
+    }
+    let total = ui.data(|data| data.get_temp::<f32>(id)).unwrap_or(0.0) + turned;
+    let steps = total.trunc();
+    ui.data_mut(|data| data.insert_temp(id, total - steps));
+    steps as i32
 }
 
 /// Paints a bar filled up to `value`, with a knob while the pointer is on it.
@@ -1130,6 +1174,50 @@ mod tests {
         assert!((seek - 45.0).abs() < 1.0, "seek to {seek}");
         let volume = volume.expect("a volume change");
         assert!((volume - 0.75).abs() < 0.02, "volume {volume}");
+    }
+
+    /// The mouse wheel turned by `notches`, up when positive.
+    fn wheel(notches: f32) -> egui::Event {
+        egui::Event::MouseWheel {
+            unit: egui::MouseWheelUnit::Line,
+            delta: vec2(0.0, notches),
+            phase: egui::TouchPhase::Move,
+            source: egui::MouseWheelSource::Wheel,
+            modifiers: egui::Modifiers::NONE,
+        }
+    }
+
+    #[test]
+    fn the_wheel_over_the_volume_bar_steps_the_volume() {
+        let now = Instant::now();
+        let track = track(now);
+        let labels = labels();
+        // The volume stays at 42% here: every step starts from there.
+        let mut harness = harness(&track, &labels, now);
+        let bar = harness.get_by_label("Volume").rect().center();
+        harness.hover_at(bar);
+        harness.run();
+        harness.event(wheel(1.0));
+        harness.run();
+        assert_eq!(harness.state().last(), Some(&Command::SetVolume(0.44)));
+        harness.event(wheel(-2.0));
+        harness.run();
+        assert_eq!(harness.state().last(), Some(&Command::SetVolume(0.38)));
+        // Half notches (a high-resolution wheel) add up to a step.
+        let count = harness.state().len();
+        harness.event(wheel(0.5));
+        harness.run();
+        assert_eq!(harness.state().len(), count);
+        harness.event(wheel(0.5));
+        harness.run();
+        assert_eq!(harness.state().last(), Some(&Command::SetVolume(0.44)));
+        // Elsewhere on the panel the wheel does nothing.
+        let count = harness.state().len();
+        harness.hover_at(harness.get_by_label("Title").rect().center());
+        harness.run();
+        harness.event(wheel(1.0));
+        harness.run();
+        assert_eq!(harness.state().len(), count);
     }
 
     #[test]

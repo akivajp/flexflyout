@@ -159,11 +159,14 @@ impl FlyoutState {
                 None
             }
             Command::StartMove | Command::OpenSettings => Some(command),
-            Command::SetVolume(level) if demo => {
+            Command::SetVolume(level) => {
+                // Show the new level at once rather than when the system
+                // reports it, so that the next step of a quickly turned
+                // wheel starts from there.
                 if let Some(volume) = &mut self.volume {
                     volume.level = level;
                 }
-                None
+                (!demo).then_some(command)
             }
             Command::ToggleMute if demo => {
                 if let Some(volume) = &mut self.volume {

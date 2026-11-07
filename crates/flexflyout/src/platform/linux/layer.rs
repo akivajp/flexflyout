@@ -22,7 +22,9 @@ use raw_window_handle::{
 use smithay_client_toolkit::compositor::{CompositorHandler, CompositorState};
 use smithay_client_toolkit::output::{OutputHandler, OutputState};
 use smithay_client_toolkit::registry::{ProvidesRegistryState, RegistryState};
-use smithay_client_toolkit::seat::pointer::{PointerEvent, PointerEventKind, PointerHandler};
+use smithay_client_toolkit::seat::pointer::{
+    AxisScroll, PointerEvent, PointerEventKind, PointerHandler,
+};
 use smithay_client_toolkit::seat::relative_pointer::{
     RelativeMotionEvent, RelativePointerHandler, RelativePointerState,
 };
@@ -945,10 +947,70 @@ impl PointerHandler for Wayland {
                         modifiers: egui::Modifiers::NONE,
                     });
                 }
-                PointerEventKind::Axis { .. } => {}
+                PointerEventKind::Axis {
+                    horizontal,
+                    vertical,
+                    source,
+                    ..
+                } => {
+                    if let Some(event) = wheel_event(&horizontal, &vertical, source, self.zoom) {
+                        self.events.push(event);
+                    }
+                }
             }
         }
     }
+}
+
+/// egui's wheel event for a scroll of the pointer's axes: in notches for a
+/// wheel (high-resolution steps count in 120ths), else in points (`zoom`
+/// logical pixels each). Wayland's axes grow down and to the right, egui's
+/// delta the other way (it says where the content moves). `None` for no
+/// movement (the end of a touchpad scroll).
+fn wheel_event(
+    horizontal: &AxisScroll,
+    vertical: &AxisScroll,
+    source: Option<wl_pointer::AxisSource>,
+    zoom: f32,
+) -> Option<egui::Event> {
+    let (unit, delta) = if horizontal.value120 != 0 || vertical.value120 != 0 {
+        let notches = |axis: &AxisScroll| -(axis.value120 as f32) / 120.0;
+        (
+            egui::MouseWheelUnit::Line,
+            egui::vec2(notches(horizontal), notches(vertical)),
+        )
+    } else if horizontal.discrete != 0 || vertical.discrete != 0 {
+        // Compositors older than wl_pointer 8.
+        (
+            egui::MouseWheelUnit::Line,
+            egui::vec2(-horizontal.discrete as f32, -vertical.discrete as f32),
+        )
+    } else {
+        let points = |axis: &AxisScroll| -(axis.absolute as f32) / zoom;
+        (
+            egui::MouseWheelUnit::Point,
+            egui::vec2(points(horizontal), points(vertical)),
+        )
+    };
+    if delta == egui::Vec2::ZERO {
+        return None;
+    }
+    let source = match source {
+        Some(wl_pointer::AxisSource::Wheel | wl_pointer::AxisSource::WheelTilt) => {
+            egui::MouseWheelSource::Wheel
+        }
+        Some(wl_pointer::AxisSource::Finger | wl_pointer::AxisSource::Continuous) => {
+            egui::MouseWheelSource::Trackpad
+        }
+        _ => egui::MouseWheelSource::Unknown,
+    };
+    Some(egui::Event::MouseWheel {
+        unit,
+        delta,
+        phase: egui::TouchPhase::Move,
+        source,
+        modifiers: egui::Modifiers::NONE,
+    })
 }
 
 impl RelativePointerHandler for Wayland {
@@ -1123,5 +1185,56 @@ mod tests {
             Some((1920, 1080)),
         );
         assert_eq!(p.margins, (0, 0, -12, 784));
+    }
+
+    #[test]
+    fn the_wheel_turns_into_egui_steps() {
+        let delta = |horizontal: AxisScroll, vertical: AxisScroll| match wheel_event(
+            &horizontal,
+            &vertical,
+            None,
+            2.0,
+        ) {
+            Some(egui::Event::MouseWheel { unit, delta, .. }) => Some((unit, delta)),
+            _ => None,
+        };
+        let none = AxisScroll::default();
+        // A notch down on Wayland (120 high-resolution units, 15 pixels)
+        // is a step down for egui, whose delta grows upwards.
+        let notch_down = AxisScroll {
+            absolute: 15.0,
+            discrete: 1,
+            value120: 120,
+            ..AxisScroll::default()
+        };
+        assert_eq!(
+            delta(none, notch_down),
+            Some((egui::MouseWheelUnit::Line, egui::vec2(0.0, -1.0)))
+        );
+        // Half a notch of a high-resolution wheel.
+        let half_up = AxisScroll {
+            absolute: -7.5,
+            value120: -60,
+            ..AxisScroll::default()
+        };
+        assert_eq!(
+            delta(none, half_up),
+            Some((egui::MouseWheelUnit::Line, egui::vec2(0.0, 0.5)))
+        );
+        // A touchpad: pixels, in points at the zoom of 2.
+        let finger = AxisScroll {
+            absolute: -10.0,
+            ..AxisScroll::default()
+        };
+        assert_eq!(
+            delta(finger, none),
+            Some((egui::MouseWheelUnit::Point, egui::vec2(5.0, 0.0)))
+        );
+        // The end of a touchpad scroll moves nothing.
+        let stop = AxisScroll {
+            stop: true,
+            ..AxisScroll::default()
+        };
+        assert_eq!(delta(none, stop), None);
     }
 }

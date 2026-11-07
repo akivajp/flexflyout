@@ -8,7 +8,7 @@
 
 > **Early development.** Windows 11 and KDE Plasma (Wayland) work; GNOME follows.
 
-A flexible, cross-platform media flyout. When you change the volume or a new track starts, it pops up with what is playing — cover art, title and artist — along with the position in the track, playback controls (including shuffle and repeat) and the volume, then fades away. Click or drag the bars to seek or set the volume. Pin the flyout to keep it on screen — and drag it wherever you like, optionally as its new usual place — or close it at once.
+A flexible, cross-platform media flyout. When you change the volume or a new track starts, it pops up with what is playing — cover art, title and artist — along with the position in the track, playback controls (including shuffle and repeat) and the volume, then fades away. Click or drag the bars to seek or set the volume, or turn the mouse wheel over the volume bar. Pin the flyout to keep it on screen — and drag it wherever you like, optionally as its new usual place — or close it at once.
 
 <p align="center"><img src="docs/images/flyout-en.png" alt="The flyout: cover art, the title and artist, the position in the track, shuffle, previous, pause, next and repeat buttons, and the volume at 64%" width="448"></p>
 

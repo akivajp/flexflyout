@@ -16,6 +16,8 @@ include breaking changes).
   on Windows, so a volume key shows it also at 0% and 100%, where the
   volume does not change. FlexFlyout follows Plasma's announcements of
   these two kinds of shortcuts only.
+- Turning the mouse wheel over the volume bar changes the volume, by 2%
+  a notch.
 - The tray icon's tooltip shows the track that plays.
 
 ### Changed
