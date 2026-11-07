@@ -18,6 +18,10 @@ include breaking changes).
   these two kinds of shortcuts only.
 
 ### Fixed
+- Starting FlexFlyout again while it ran (from the Start menu or the app
+  menu, say) started a second one: two flyouts at every change, two tray
+  icons, and an emptied log of the first one. It now opens the settings
+  window instead, and leaves the running one alone.
 - Linux: after the sound server restarted (PipeWire does after an update,
   or when restarted to fix a Bluetooth device), or when it was not up yet
   at login, the flyout no longer followed the volume. FlexFlyout now

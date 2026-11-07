@@ -23,6 +23,8 @@ mod update;
 mod app;
 #[cfg(any(windows, target_os = "linux"))]
 mod demo;
+#[cfg(any(windows, target_os = "linux"))]
+mod instance;
 #[cfg(target_os = "linux")]
 mod linux_app;
 #[cfg(any(windows, target_os = "linux"))]
@@ -100,6 +102,13 @@ fn main() -> ExitCode {
 
 /// Sets up logging and the translations, then hands over to the host.
 fn run(cli: Cli) -> anyhow::Result<()> {
+    // Started again while it runs (from the Start menu or the app menu,
+    // say): hand over to the running flyout before touching its log. The
+    // demo is for trying things out, and may run next to it.
+    #[cfg(any(windows, target_os = "linux"))]
+    if !cli.settings && !cli.demo && !instance::claim(instance::Kind::Flyout) {
+        return hand_over(&cli);
+    }
     let log_name = if cli.settings {
         "settings.log"
     } else {
@@ -159,6 +168,18 @@ fn run(cli: Cli) -> anyhow::Result<()> {
         let _ = (labels, config, config_file);
         anyhow::bail!("FlexFlyout runs only on Windows and Linux for now")
     }
+}
+
+/// Another flyout runs in this session: opens the settings window, the
+/// nearest thing FlexFlyout has to a main window (and what someone who
+/// starts it again most likely looks for), and leaves the running flyout
+/// alone. Its changes reach the running flyout through the settings file.
+#[cfg(any(windows, target_os = "linux"))]
+fn hand_over(cli: &Cli) -> anyhow::Result<()> {
+    let config_file = cli.config.clone().unwrap_or_else(settings::default_file);
+    settings_window::spawn(&config_file, cli.lang.as_deref())
+        .context("FlexFlyout runs already, and its settings window cannot be opened")?;
+    Ok(())
 }
 
 /// Starts looking for a newer release (not in the demo, which is for

@@ -218,18 +218,25 @@ pub fn open(config_file: &std::path::Path, lang: Option<&str>) {
         os::bring_to_front(child.id());
         return;
     }
-    let spawned = std::env::current_exe().and_then(|exe| {
-        let mut command = std::process::Command::new(exe);
-        command.arg("--settings").arg("--config").arg(config_file);
-        if let Some(lang) = lang {
-            command.arg("--lang").arg(lang);
-        }
-        command.spawn()
-    });
-    match spawned {
+    match spawn(config_file, lang) {
         Ok(child) => *open = Some(child),
         Err(err) => log::error!("cannot open the settings window: {err}"),
     }
+}
+
+/// Starts the settings window's process (`--settings`) for `config_file`,
+/// in `lang` if given. A settings window that is open already comes to
+/// the front instead, and the new process ends.
+pub fn spawn(
+    config_file: &std::path::Path,
+    lang: Option<&str>,
+) -> std::io::Result<std::process::Child> {
+    let mut command = std::process::Command::new(std::env::current_exe()?);
+    command.arg("--settings").arg("--config").arg(config_file);
+    if let Some(lang) = lang {
+        command.arg("--lang").arg(lang);
+    }
+    command.spawn()
 }
 
 /// Whether no other settings window is open (if one is, it is brought to
@@ -244,10 +251,8 @@ mod os {
     use std::path::{Path, PathBuf};
 
     use flexflyout_core::layout::MonitorArea;
-    use windows::Win32::Foundation::{ERROR_ALREADY_EXISTS, GetLastError};
-    use windows::Win32::System::Threading::CreateMutexW;
-    use windows::core::w;
 
+    use crate::instance::{self, Kind};
     use crate::platform::windows::{autostart, monitor, tray, window};
 
     pub fn install_fonts(ctx: &eframe::egui::Context) {
@@ -285,16 +290,11 @@ mod os {
     }
 
     /// Whether no other settings window is open. If one is, it is brought to
-    /// the front. The check holds a named mutex for the life of the process
-    /// (Windows releases it when the process ends, even when killed), so a
-    /// left-over ID file of an ended process is never trusted.
+    /// the front. Which one is open is told by `instance` (released when the
+    /// process ends, even when killed), so a left-over ID file of an ended
+    /// process is never trusted.
     pub fn first_instance() -> bool {
-        // SAFETY: creates or opens a named mutex; the handle is deliberately
-        // kept open until the process ends.
-        let created = unsafe { CreateMutexW(None, false, w!("Local\\FlexFlyoutSettings")) };
-        // SAFETY: reads this thread's last error, set by the call above.
-        let existed = unsafe { GetLastError() } == ERROR_ALREADY_EXISTS;
-        if created.is_err() || !existed {
+        if instance::claim(Kind::Settings) {
             let _ = std::fs::write(pid_file(), std::process::id().to_string());
             return true;
         }
@@ -313,10 +313,10 @@ mod os {
 #[cfg(target_os = "linux")]
 mod os {
     use std::path::Path;
-    use std::sync::OnceLock;
 
     use flexflyout_core::layout::MonitorArea;
 
+    use crate::instance::{self, Kind};
     use crate::platform::linux::{desktop, fonts, layer};
 
     pub fn install_fonts(ctx: &eframe::egui::Context) {
@@ -346,29 +346,13 @@ mod os {
     /// Wayland lets no other program raise a window: nothing to do.
     pub fn bring_to_front(_pid: u32) {}
 
-    /// Whether no other settings window is open: it holds a lock on a file
-    /// for the life of its process (released when the process ends, even
-    /// when killed).
+    /// Whether no other settings window is open (told by `instance`).
     pub fn first_instance() -> bool {
-        static LOCK: OnceLock<std::fs::File> = OnceLock::new();
-        let dir = std::env::var_os("XDG_RUNTIME_DIR")
-            .map(std::path::PathBuf::from)
-            .unwrap_or_else(std::env::temp_dir);
-        let file = match std::fs::File::create(dir.join("flexflyout-settings.lock")) {
-            Ok(file) => file,
-            // Without the file, a second window is the lesser evil.
-            Err(_) => return true,
-        };
-        match file.try_lock() {
-            Ok(()) => {
-                let _ = LOCK.set(file);
-                true
-            }
-            Err(_) => {
-                log::info!("the settings window is open already");
-                false
-            }
+        let first = instance::claim(Kind::Settings);
+        if !first {
+            log::info!("the settings window is open already");
         }
+        first
     }
 }
 

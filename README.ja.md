@@ -47,7 +47,7 @@ scoop install akivajp/flexflyout
 
 または、[Releases](https://github.com/akivajp/flexflyout/releases) のページから `flexflyout-<版>-x86_64-pc-windows-msvc.zip` を取り、好きな場所に展開して `flexflyout.exe` を起動します（チェックサムは `SHA256SUMS`）。まだコード署名をしていないため、初回に Windows SmartScreen の警告が出ることがあります。**詳細情報** → **実行** を選んでください。
 
-FlexFlyout は通知領域（タスクトレイ）で動きます。メニューから、Flyout の表示・設定ウィンドウ・**Windows の起動時に開始**の切り替え・終了ができます。設定は `%APPDATA%\flexflyout\config.toml` に保存され、手で書き換えることもできます（保存して1秒以内に反映）。`flexflyout --help` でコマンドラインのオプションを、`flexflyout --demo` で見本の曲を表示できます。
+FlexFlyout は通知領域（タスクトレイ）で動きます。メニューから、Flyout の表示・設定ウィンドウ・**Windows の起動時に開始**の切り替え・終了ができます。動いているときにもう一度起動すると、設定ウィンドウが開きます。設定は `%APPDATA%\flexflyout\config.toml` に保存され、手で書き換えることもできます（保存して1秒以内に反映）。`flexflyout --help` でコマンドラインのオプションを、`flexflyout --demo` で見本の曲を表示できます。
 
 ### アンインストール
 
@@ -70,7 +70,7 @@ cd flexflyout/packaging/aur/flexflyout-bin && makepkg -si
 
 ほかのディストリビューション（glibc 2.35 以降）では、[Releases](https://github.com/akivajp/flexflyout/releases) のページから `flexflyout-<版>-x86_64-unknown-linux-gnu.tar.gz` を取り、`flexflyout` を `PATH` の通った場所に置きます。メニュー項目が要る場合は、`flexflyout.desktop` を `~/.local/share/applications` に、`flexflyout.png` を `~/.local/share/icons/hicolor/256x256/apps` に置いてください。
 
-メニューか `flexflyout` で起動します。タスクトレイのアイコン（KDE Plasma）のメニューは Windows と同じで、自動起動は **ログイン時に開始** です。設定は `~/.config/flexflyout/config.toml`、ログは `~/.local/state/flexflyout/` にあります。Windows と同じく、KDE Plasma 自身の音量表示と重ならないように表示するか、動いている間だけ消すかを選べます（消えるのは音量の表示だけで、明るさなどの表示は残ります）。
+メニューか `flexflyout` で起動します（動いているときにもう一度起動すると、設定ウィンドウが開きます）。タスクトレイのアイコン（KDE Plasma）のメニューは Windows と同じで、自動起動は **ログイン時に開始** です。設定は `~/.config/flexflyout/config.toml`、ログは `~/.local/state/flexflyout/` にあります。Windows と同じく、KDE Plasma 自身の音量表示と重ならないように表示するか、動いている間だけ消すかを選べます（消えるのは音量の表示だけで、明るさなどの表示は残ります）。
 
 消すときは、**ログイン時に開始** を外し（または `~/.config/autostart/flexflyout.desktop` を消し）、パッケージを外す（`sudo pacman -R flexflyout-bin`）かファイルを消します。必要なら `~/.config/flexflyout` と `~/.local/state/flexflyout` も消してください。
 
