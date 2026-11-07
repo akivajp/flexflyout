@@ -24,8 +24,8 @@ log = "0.4.35"
 rust-embed = "8.13"
 simplelog = "0.12.2"
 
-# The Windows host. Other platforms get their own hosts later (KDE through
-# layer-shell, which winit and therefore eframe do not support).
+# The Windows host. The Linux host has its own below (layer-shell, which
+# winit and therefore eframe do not support).
 [target.'cfg(windows)'.dependencies]
 eframe = { version = "0.37", default-features = false, features = ["wgpu"] }
 raw-window-handle = "0.6.2"

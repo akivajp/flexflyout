@@ -1,8 +1,9 @@
 //! Platform-independent parts of FlexFlyout.
 //!
 //! This crate depends neither on an OS API nor on egui, so that every host
-//! (Windows with eframe now, KDE and GNOME later) shares the same model and
-//! the same timing rules, and so that they can be tested anywhere.
+//! (Windows with eframe, Linux with layer-shell, and later GNOME) shares the
+//! same model and the same timing rules, and so that they can be tested
+//! anywhere.
 
 use std::fmt;
 use std::sync::Arc;

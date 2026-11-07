@@ -54,11 +54,11 @@ pub fn language(command_line: Option<&str>, config: &Config) -> Option<String> {
 
 /// Asks the watching thread to read the settings at once.
 #[derive(Clone, Debug)]
-// Only the Windows host reloads its settings so far.
-#[cfg_attr(not(windows), allow(dead_code))]
+// Unused where FlexFlyout has no host yet (only Windows and Linux do).
+#[cfg_attr(not(any(windows, target_os = "linux")), allow(dead_code))]
 pub struct Reload(Sender<()>);
 
-#[cfg_attr(not(windows), allow(dead_code))]
+#[cfg_attr(not(any(windows, target_os = "linux")), allow(dead_code))]
 impl Reload {
     /// Reads the settings now, even if the file looks unchanged.
     pub fn now(&self) {
@@ -69,7 +69,7 @@ impl Reload {
 /// Calls `on_change` on a thread of its own with the new settings every
 /// time the file is saved and can be read, or when asked through the
 /// returned [`Reload`].
-#[cfg_attr(not(windows), allow(dead_code))]
+#[cfg_attr(not(any(windows, target_os = "linux")), allow(dead_code))]
 pub fn watch(path: PathBuf, mut on_change: impl FnMut(Config) + Send + 'static) -> Reload {
     let (reload, requests) = channel();
     let spawned = thread::Builder::new()

@@ -11,7 +11,7 @@ description = "Drawing of the FlexFlyout panel with egui, shared by every host"
 publish = false
 
 # Only egui here: no OS API and no windowing, so that the Windows host
-# (eframe) and the future KDE host (smithay-client-toolkit) can both use it.
+# (eframe) and the Linux host (smithay-client-toolkit) can both use it.
 [dependencies]
 egui = "0.37"
 # The font reader egui itself uses (same version), for the fonts' metrics.

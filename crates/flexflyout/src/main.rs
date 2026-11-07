@@ -3,8 +3,9 @@
 //! Shows what is playing (cover art, title, artist) with playback controls
 //! and the volume when the volume changes or a new track starts.
 //!
-//! Only the Windows host exists so far. `--demo` shows sample tracks every
-//! few seconds instead of following the system.
+//! There are two hosts: Windows (eframe) and Linux on Wayland (layer-shell).
+//! `--demo` shows sample tracks every few seconds instead of following the
+//! system.
 
 // Release builds on Windows use the GUI subsystem (no console window).
 // `console::attach_parent` brings `--help` and errors back to a terminal.

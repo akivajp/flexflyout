@@ -18,8 +18,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Windows builds the whole app; Linux checks the platform-independent
-        # crates (and the stub binary) until the KDE host exists.
+        # Each builds and tests its own host (Windows: eframe; Linux:
+        # layer-shell) along with the shared crates.
         os: [ubuntu-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     steps:

@@ -39,8 +39,8 @@ pub fn load(lang: Option<&str>) -> anyhow::Result<FluentLanguageLoader> {
 
 /// Texts of the notification area icon's menu.
 #[derive(Clone, Debug)]
-// Only the Windows host has a tray icon so far.
-#[cfg_attr(not(windows), allow(dead_code))]
+// Unused where FlexFlyout has no host yet (only Windows and Linux do).
+#[cfg_attr(not(any(windows, target_os = "linux")), allow(dead_code))]
 pub struct TrayLabels {
     /// Show the flyout.
     pub show: String,
@@ -59,7 +59,7 @@ pub struct TrayLabels {
 }
 
 /// Texts of the tray menu in the loaded language.
-#[cfg_attr(not(windows), allow(dead_code))]
+#[cfg_attr(not(any(windows, target_os = "linux")), allow(dead_code))]
 pub fn tray_labels(loader: &FluentLanguageLoader) -> TrayLabels {
     TrayLabels {
         show: fl!(loader, "tray-show"),
