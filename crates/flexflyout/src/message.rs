@@ -35,12 +35,9 @@ pub enum Message {
 /// Why the flyout is shown (for the log).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Trigger {
-    /// A volume key was pressed.
-    // Only the Windows host watches the keys.
-    #[cfg_attr(not(windows), allow(dead_code))]
+    /// A volume key was pressed (on Windows, and on KDE Plasma).
     VolumeKey,
-    /// A media key was pressed.
-    #[cfg_attr(not(windows), allow(dead_code))]
+    /// A media key was pressed (on Windows, and on KDE Plasma).
     MediaKey,
     /// The volume changed, or another output device became the default.
     VolumeChange,

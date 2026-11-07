@@ -59,7 +59,7 @@ If you hid the Windows volume indicator, it comes back when FlexFlyout quits.
 
 ## Installation (Linux)
 
-FlexFlyout runs on Wayland desktops whose compositor offers layer-shell — KDE Plasma, sway, Hyprland and other wlroots ones (not GNOME, and not X11). It follows any player with MPRIS (Spotify, browsers, VLC, mpv with mpv-mpris, Elisa…) and the volume through PipeWire or PulseAudio; the volume keys work through the volume change they cause.
+FlexFlyout runs on Wayland desktops whose compositor offers layer-shell — KDE Plasma, sway, Hyprland and other wlroots ones (not GNOME, and not X11). It follows any player with MPRIS (Spotify, browsers, VLC, mpv with mpv-mpris, Elisa…) and the volume through PipeWire or PulseAudio. The volume keys show it through the volume change they cause; on KDE Plasma, where they are Plasma's shortcuts, the volume and media keys show it themselves, also at 0% and 100%.
 
 On Arch Linux and derivatives (CachyOS, EndeavourOS, Manjaro), [`packaging/aur/flexflyout-bin/PKGBUILD`](packaging/aur/flexflyout-bin/PKGBUILD) installs the release binary with a menu entry:
 
@@ -94,7 +94,7 @@ Code signing of the Windows releases through the [SignPath Foundation](https://s
 
 ### Privacy
 
-FlexFlyout collects no telemetry. It reads what the media players report to the system (the track, its cover art and position) and the volume, and on Windows watches the volume and media keys only to know when to show the flyout (no other key is recorded or kept). Its settings and its log stay on your machine.
+FlexFlyout collects no telemetry. It reads what the media players report to the system (the track, its cover art and position) and the volume, and watches the volume and media keys only to know when to show the flyout — on Windows through a keyboard hook, on KDE Plasma through the announcements of those two kinds of Plasma's shortcuts (no other key is recorded or kept). Its settings and its log stay on your machine.
 
 Network access:
 

@@ -59,7 +59,7 @@ Windows 標準の音量表示を消す設定にしていた場合も、FlexFlyou
 
 ## インストール（Linux）
 
-layer-shell に対応した Wayland のデスクトップで動きます。KDE Plasma・sway・Hyprland など wlroots 系が対象で、GNOME と X11 では動きません。MPRIS に対応したプレーヤー（Spotify・ブラウザー・VLC・mpv-mpris を入れた mpv・Elisa など）と、PipeWire または PulseAudio の音量に合わせて表示します。音量キーは、キーで音量が変わることで表示のきっかけになります。
+layer-shell に対応した Wayland のデスクトップで動きます。KDE Plasma・sway・Hyprland など wlroots 系が対象で、GNOME と X11 では動きません。MPRIS に対応したプレーヤー（Spotify・ブラウザー・VLC・mpv-mpris を入れた mpv・Elisa など）と、PipeWire または PulseAudio の音量に合わせて表示します。音量キーは、キーで音量が変わることで表示のきっかけになります。KDE Plasma では、音量キーとメディアキーが Plasma のショートカットなので、キーを押したこと自体で表示します（音量が 0% や 100% のときも出ます）。
 
 Arch Linux とその派生（CachyOS・EndeavourOS・Manjaro）では、[`packaging/aur/flexflyout-bin/PKGBUILD`](packaging/aur/flexflyout-bin/PKGBUILD) でリリースのバイナリーをメニュー項目付きで入れられます。
 
@@ -94,7 +94,7 @@ Windows 版のリリースは、[SignPath Foundation](https://signpath.org) に�
 
 ### プライバシー
 
-FlexFlyout は利用状況を送信しません。メディアプレーヤーがシステムに知らせる情報（曲、ジャケット、再生位置）と音量を読み、Windows では Flyout を出すきっかけとして音量キーとメディアキーを見るだけです（ほかのキーは記録も保存もしません）。設定とログは手元の PC にだけ置かれます。
+FlexFlyout は利用状況を送信しません。メディアプレーヤーがシステムに知らせる情報（曲、ジャケット、再生位置）と音量を読み、Flyout を出すきっかけとして音量キーとメディアキーを見るだけです。Windows ではキーボードのフックで、KDE Plasma ではこの2種類の Plasma のショートカットが実行された知らせで見ます（ほかのキーは記録も保存もしません）。設定とログは手元の PC にだけ置かれます。
 
 ネットワークへの接続:
 

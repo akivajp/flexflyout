@@ -21,6 +21,7 @@ use wayland_client::globals::registry_queue_init;
 use crate::flyout::{FlyoutState, Received};
 use crate::i18n::TrayLabels;
 use crate::message::{Message, TrayCommand, Trigger};
+use crate::platform::linux::keys::{self, Key};
 use crate::platform::linux::layer::{self, Wayland};
 use crate::platform::linux::media::{self, Media};
 use crate::platform::linux::volume::{self, VolumeControl};
@@ -318,8 +319,8 @@ impl Host {
     }
 }
 
-/// Starts following the players and the volume. Returns what the flyout's
-/// controls act on.
+/// Starts following the players, the volume and (on KDE Plasma) the keys.
+/// Returns what the flyout's controls act on.
 fn start_sources(
     send: impl Fn(Message) + Clone + Send + 'static,
     show_on_play_pause: Arc<AtomicBool>,
@@ -331,6 +332,17 @@ fn start_sources(
             to_flyout(Message::show(Trigger::VolumeChange));
         }
     });
+    // Elsewhere nothing announces the keys (the volume change still shows
+    // the flyout, only not at 0% or 100%).
+    if native_osd::is_kde() {
+        let to_flyout = send.clone();
+        keys::spawn(move |key| {
+            to_flyout(Message::show(match key {
+                Key::Volume => Trigger::VolumeKey,
+                Key::Media => Trigger::MediaKey,
+            }));
+        });
+    }
     let media = media::spawn(move |now_playing, change| {
         send(Message::NowPlaying(now_playing));
         match change {

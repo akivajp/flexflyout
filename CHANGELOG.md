@@ -7,6 +7,12 @@ include breaking changes).
 
 ## [Unreleased]
 
+### Added
+- KDE Plasma: the volume and media keys show the flyout themselves, as
+  on Windows, so a volume key shows it also at 0% and 100%, where the
+  volume does not change. FlexFlyout follows Plasma's announcements of
+  these two kinds of shortcuts only.
+
 ### Fixed
 - Linux: after the sound server restarted (PipeWire does after an update,
   or when restarted to fix a Bluetooth device), or when it was not up yet
