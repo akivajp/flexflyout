@@ -17,6 +17,11 @@ include breaking changes).
   volume does not change. FlexFlyout follows Plasma's announcements of
   these two kinds of shortcuts only.
 
+### Changed
+- Linux: when FlexFlyout cannot start (on GNOME, which lacks layer-shell,
+  or in an X11 session), it says why in a notification: started from the
+  menu or at login, nothing else would show.
+
 ### Fixed
 - Starting FlexFlyout again while it ran (from the Start menu or the app
   menu, say) started a second one: two flyouts at every change, two tray

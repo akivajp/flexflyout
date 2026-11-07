@@ -29,13 +29,23 @@ pub fn attach_parent() {
 #[cfg(not(windows))]
 pub fn attach_parent() {}
 
-/// Reports a fatal error: on the console when there is one, otherwise (a
-/// Windows GUI launched from Explorer) in a message box.
+/// Reports a fatal error: on the console when there is one, otherwise in a
+/// message box (a Windows GUI launched from Explorer) or a desktop
+/// notification (Linux, started from the desktop's menu or at login).
 pub fn report_error(message: &str) {
     #[cfg(windows)]
     if !HAS_CONSOLE.load(Ordering::Relaxed) {
         show_message_box(message);
         return;
+    }
+    // Without a terminal, nobody sees stderr: on GNOME, which lacks
+    // layer-shell, or in an X11 session, nothing would seem to happen.
+    #[cfg(target_os = "linux")]
+    {
+        use std::io::IsTerminal as _;
+        if !std::io::stderr().is_terminal() {
+            crate::platform::linux::desktop::notify("FlexFlyout", message);
+        }
     }
     eprintln!("Error: {message}");
 }
