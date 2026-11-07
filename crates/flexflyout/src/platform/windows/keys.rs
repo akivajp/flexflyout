@@ -11,6 +11,7 @@
 //! for the volume; the track change covers the media keys.
 
 use std::sync::OnceLock;
+use std::sync::mpsc::{Sender, channel};
 
 use anyhow::Context as _;
 use windows::Win32::Foundation::{LPARAM, LRESULT, WPARAM};
@@ -33,14 +34,30 @@ pub enum Key {
     Media,
 }
 
-/// Where the hook sends the keys. The hook procedure is a plain function,
-/// so it finds the receiver here; there is one hook per process.
-static SINK: OnceLock<Box<dyn Fn(Key) + Send + Sync>> = OnceLock::new();
+/// Where the hook sends the keys: to the thread that tells the app. The
+/// hook procedure only hands a key on, because Windows silently removes a
+/// low-level hook that takes longer than `LowLevelHooksTimeout` to return
+/// (telling the app places the window, which can take a while when the
+/// system is busy). It is a plain function, so it finds the channel here;
+/// there is one hook per process.
+static KEYS: OnceLock<Sender<Key>> = OnceLock::new();
 
 /// Starts watching the keys.
-pub fn spawn(sink: impl Fn(Key) + Send + Sync + 'static) {
-    if SINK.set(Box::new(sink)).is_err() {
+pub fn spawn(sink: impl Fn(Key) + Send + 'static) {
+    let (keys, received) = channel();
+    if KEYS.set(keys).is_err() {
         log::warn!("the keys are already watched");
+        return;
+    }
+    let spawned = std::thread::Builder::new()
+        .name("keys-sink".into())
+        .spawn(move || {
+            for key in received {
+                sink(key);
+            }
+        });
+    if let Err(err) = spawned {
+        log::error!("cannot start the key thread: {err}");
         return;
     }
     let spawned = std::thread::Builder::new().name("keys".into()).spawn(|| {
@@ -89,8 +106,8 @@ unsafe extern "system" fn hook(code: i32, wparam: WPARAM, lparam: LPARAM) -> LRE
             }
             _ => None,
         };
-        if let (Some(key), Some(sink)) = (key, SINK.get()) {
-            sink(key);
+        if let (Some(key), Some(keys)) = (key, KEYS.get()) {
+            let _ = keys.send(key);
         }
     }
     // SAFETY: passes the event on unchanged, as every hook must.
