@@ -10,10 +10,12 @@ rust-version.workspace = true
 description = "Drawing of the FlexFlyout panel with egui, shared by every host"
 publish = false
 
-# Only egui here: no OS API and no windowing, so that the Windows host
+# egui (and log) only: no OS API and no windowing, so that the Windows host
 # (eframe) and the Linux host (smithay-client-toolkit) can both use it.
 [dependencies]
 egui = "0.37"
+# Which fonts were found for which characters, for the hosts' logs.
+log = "0.4"
 # The font reader egui itself uses (same version), for the fonts' metrics.
 skrifa = "0.44"
 flexflyout-core = { path = "../flexflyout-core" }

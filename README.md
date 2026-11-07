@@ -78,7 +78,7 @@ To remove it: turn **Start at login** off (or delete `~/.config/autostart/flexfl
 
 - **Now playing and playback controls**: the System Media Transport Controls (SMTC) on Windows, MPRIS on Linux
 - **Volume**: Core Audio on Windows, PipeWire / PulseAudio on Linux
-- **UI**: Rust and [egui](https://github.com/emilk/egui)
+- **UI**: Rust and [egui](https://github.com/emilk/egui), with the system's fonts: titles in any script it has fonts for (Korean, Chinese, Thai…) show in them
 - **Languages**: English and Japanese first, on top of a translation mechanism that makes adding more languages easy
 
 ## Background

@@ -14,10 +14,11 @@ use crate::message::{Message, Trigger};
 const INTERVAL: Duration = Duration::from_secs(6);
 
 /// Sample tracks: a Japanese title (fonts) with square cover art, a long
-/// one (truncation) with wide art (cropping), and a video without an artist
-/// or art (the placeholder). The first two have a position and
-/// shuffle and repeat; the video has none of them (a live stream).
-const TRACKS: [SampleTrack; 3] = [
+/// one (truncation) with wide art (cropping), a video without an artist
+/// or art (the placeholder), and Korean, Chinese and Thai (fonts found on
+/// demand). The first two have a position and shuffle and repeat; the
+/// others have none of them (a live stream).
+const TRACKS: [SampleTrack; 4] = [
     (
         "サンプルの曲（Sample Track）",
         "FlexFlyout デモ",
@@ -29,6 +30,9 @@ const TRACKS: [SampleTrack; 3] = [
         Some((320, 180)),
     ),
     ("Video without an artist", "", None),
+    // "Song" in Korean and "our song" in Simplified Chinese (short enough
+    // to show whole); "sample artist" in Thai.
+    ("노래 · 我们的歌", "ศิลปินตัวอย่าง", None),
 ];
 
 /// A sample track: title, artist and the size of its cover art, if any.

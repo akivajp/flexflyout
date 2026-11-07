@@ -78,7 +78,7 @@ cd flexflyout/packaging/aur/flexflyout-bin && makepkg -si
 
 - **再生中の曲の情報と操作**: Windows は System Media Transport Controls（SMTC）、Linux は MPRIS
 - **音量**: Windows は Core Audio、Linux は PipeWire / PulseAudio
-- **画面**: Rust と [egui](https://github.com/emilk/egui)
+- **画面**: Rust と [egui](https://github.com/emilk/egui)。字は OS のフォントで描き、OS にフォントがある文字（韓国語・中国語・タイ語など）なら、どの言語の曲名も表示できる
 - **表示言語**: まず英語と日本語。ほかの言語も足しやすい、翻訳の仕組みの上に作る
 
 ## 作る理由

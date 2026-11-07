@@ -8,6 +8,10 @@ include breaking changes).
 ## [Unreleased]
 
 ### Added
+- Titles and artists in scripts the flyout's own fonts lack (Korean,
+  Chinese, Thai, Hindi…) show in the system's fonts instead of as empty
+  boxes. They are found through the system's font fallback (DirectWrite
+  on Windows, fontconfig on Linux) when first needed.
 - KDE Plasma: the volume and media keys show the flyout themselves, as
   on Windows, so a volume key shows it also at 0% and 100%, where the
   volume does not change. FlexFlyout follows Plasma's announcements of

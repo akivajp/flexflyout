@@ -102,7 +102,13 @@ pub fn run(
 
     let ctx = egui::Context::default();
     ctx.options_mut(|options| options.zoom_with_keyboard = false);
-    let fonts = flexflyout_ui::fonts::install(&ctx, crate::platform::linux::fonts::find());
+    // The desktop's fonts, then any other the system's fallback finds for
+    // a title in a script they lack.
+    let fonts = flexflyout_ui::fonts::install_with_fallback(
+        &ctx,
+        crate::platform::linux::fonts::find(),
+        egui_system_font_provider::SystemFontProvider::new(),
+    );
     log::info!("fonts: {fonts:?}");
 
     // Read by the player's thread, which decides whether to show.

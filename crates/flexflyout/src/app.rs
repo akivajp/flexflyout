@@ -70,6 +70,8 @@ pub fn run(
             .with_taskbar(false)
             .with_active(false)
             .with_resizable(false),
+        // The flyout installs its own fallback (see `FlyoutApp::new`).
+        system_font_fallback: false,
         ..Default::default()
     };
     let result = eframe::run_native(
@@ -219,7 +221,13 @@ impl FlyoutApp {
         let window = FlyoutWindow::new(cc)?;
         // Also applies the shadow change above (SWP_FRAMECHANGED).
         window.apply_flyout_style()?;
-        let fonts = setup_fonts(&cc.egui_ctx);
+        // The Windows UI fonts, then any other the system's fallback finds
+        // for a title in a script they lack (Korean, Chinese, Thai…).
+        let fonts = flexflyout_ui::fonts::install_with_fallback(
+            &cc.egui_ctx,
+            windows_fonts(),
+            egui_system_font_provider::SystemFontProvider::new(),
+        );
         log::info!("fonts: {fonts:?}");
         // The panel is drawn in points at scale 1.0; the zoom factor makes
         // it larger or smaller, and the window is sized to match on every
@@ -617,13 +625,15 @@ impl FlyoutApp {
 /// Uses the Windows UI fonts so that the flyout looks native: Segoe UI for
 /// Latin text, then a Japanese font (titles can be Japanese whatever the GUI
 /// language is). egui's own fonts are not built in (their licence is not an
-/// OSI one, which code signing for open source asks about), so these are
-/// all the fonts there are. Returns the fonts used and their baseline
-/// offsets, for the log.
-///
-/// Whole font files stay in memory, so only one per script is loaded for
-/// now. Chinese and Korean fonts can be added on demand later.
+/// OSI one, which code signing for open source asks about). Returns the
+/// fonts used and their baseline offsets, for the log.
 pub(crate) fn setup_fonts(ctx: &egui::Context) -> Vec<(String, f32)> {
+    flexflyout_ui::fonts::install(ctx, windows_fonts())
+}
+
+/// The Windows UI fonts (see [`setup_fonts`]), read whole. Only one per
+/// script is read up front; fonts for other scripts are found when needed.
+fn windows_fonts() -> Vec<(String, Vec<u8>)> {
     // In order of preference: the first file found in each group is used.
     let groups: [&[&str]; 2] = [
         &[
@@ -637,7 +647,7 @@ pub(crate) fn setup_fonts(ctx: &egui::Context) -> Vec<(String, f32)> {
             r"C:\Windows\Fonts\msgothic.ttc",
         ],
     ];
-    let fonts = groups
+    groups
         .iter()
         .filter_map(|group| {
             group.iter().find_map(|path| {
@@ -646,6 +656,5 @@ pub(crate) fn setup_fonts(ctx: &egui::Context) -> Vec<(String, f32)> {
                     .map(|bytes| (path.to_string(), bytes))
             })
         })
-        .collect();
-    flexflyout_ui::fonts::install(ctx, fonts)
+        .collect()
 }

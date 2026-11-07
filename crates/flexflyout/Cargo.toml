@@ -24,6 +24,12 @@ log = "0.4.35"
 rust-embed = "8.13"
 simplelog = "0.12.2"
 
+# Both hosts: fonts for the characters the flyout's own fonts lack (Korean
+# or Chinese titles, say), found through the system's font fallback
+# (DirectWrite, fontconfig) when they are first needed, and memory-mapped.
+[target.'cfg(any(windows, target_os = "linux"))'.dependencies]
+egui_system_font_provider = "0.37"
+
 # The Windows host. The Linux host has its own below (layer-shell, which
 # winit and therefore eframe do not support).
 [target.'cfg(windows)'.dependencies]
