@@ -7,6 +7,14 @@ include breaking changes).
 
 ## [Unreleased]
 
+### Fixed
+- Linux: after the sound server restarted (PipeWire does after an update,
+  or when restarted to fix a Bluetooth device), or when it was not up yet
+  at login, the flyout no longer followed the volume. FlexFlyout now
+  connects again.
+- Linux: the volume bar set every channel to the same level, losing the
+  balance between left and right. It now keeps it.
+
 ## [0.6.0] - 2026-11-05
 
 ### Added

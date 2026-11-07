@@ -6,15 +6,26 @@
 //! on another one after each, and carries out the flyout's volume bar and
 //! mute button. Volume key presses reach the desktop, which changes the
 //! volume; the change is what shows the flyout.
+//!
+//! The sound server can go away while FlexFlyout runs (PipeWire restarts
+//! after an update, or by hand to fix a Bluetooth device) or not be there
+//! yet at login: the volume thread then connects again, waiting a little
+//! longer after every failed attempt.
 
 use std::ffi::CString;
 use std::io::BufReader;
 use std::os::unix::net::UnixStream;
 use std::sync::mpsc::{Receiver, Sender, channel};
+use std::time::Duration;
 
 use anyhow::Context as _;
 use flexflyout_core::Volume;
 use pulseaudio::protocol;
+
+/// How long to wait before connecting again, after the first failure and
+/// at most: the wait doubles after every failed attempt.
+const RETRY_FIRST: Duration = Duration::from_secs(1);
+const RETRY_MAX: Duration = Duration::from_secs(30);
 
 /// Receives the volume: once at the start (`changed` false), then on every
 /// change of the level, of muting or of the default device (`changed`
@@ -30,6 +41,9 @@ enum Request {
     SetLevel(f32),
     /// Mute, or unmute.
     ToggleMute,
+    /// The connection that watches the changes broke (the sound server
+    /// quit or restarted): why.
+    Lost(String),
 }
 
 /// Changes the volume of the default output device.
@@ -59,11 +73,7 @@ pub fn spawn(sink: impl Fn(Volume, bool) + Send + 'static) -> VolumeControl {
     let sink: Sink = Box::new(sink);
     let spawned = std::thread::Builder::new()
         .name("volume".into())
-        .spawn(move || {
-            if let Err(err) = run(&sink, requests, &received) {
-                log::error!("the volume cannot be followed: {err:#}");
-            }
-        });
+        .spawn(move || run(&sink, &requests, &received));
     if let Err(err) = spawned {
         log::error!("cannot start the volume thread: {err}");
     }
@@ -75,40 +85,97 @@ pub fn spawn(sink: impl Fn(Volume, bool) + Send + 'static) -> VolumeControl {
 struct Device {
     name: CString,
     volume: Volume,
-    channels: u8,
+    /// The raw volume of each channel (`protocol::Volume::NORM` is 100%).
+    channels: Vec<u32>,
 }
 
-/// Reads the volume after every change, and carries out the requests.
-fn run(sink: &Sink, requests: Sender<Request>, received: &Receiver<Request>) -> anyhow::Result<()> {
+/// Follows the volume until the app ends, connecting again whenever the
+/// sound server goes away or cannot be reached.
+fn run(sink: &Sink, requests: &Sender<Request>, received: &Receiver<Request>) {
+    // The device reported last, kept across connections.
+    let mut known: Option<Device> = None;
+    let mut wait = RETRY_FIRST;
+    // Only the first failure in a row is logged: a machine without a sound
+    // server would otherwise fill the log.
+    let mut logged = false;
+    loop {
+        let mut connected = false;
+        let Err(err) = follow(sink, requests, received, &mut known, &mut connected) else {
+            return; // The app is closing.
+        };
+        if connected {
+            // It worked for a while: start again with short waits.
+            wait = RETRY_FIRST;
+            logged = false;
+        }
+        if !logged {
+            log::warn!("the volume cannot be followed: {err:#}; connecting again");
+            logged = true;
+        }
+        std::thread::sleep(wait);
+        wait = (wait * 2).min(RETRY_MAX);
+        // What was asked meanwhile is about a state that is gone.
+        while received.try_recv().is_ok() {}
+    }
+}
+
+/// Connects to the sound server, reports the volume, then reads it again
+/// after every change and carries out the requests. Returns `Ok` when the
+/// app ends, and an error when the server cannot be reached or goes away
+/// (`connected` tells whether it was reached). `known` is the device
+/// reported last.
+fn follow(
+    sink: &Sink,
+    requests: &Sender<Request>,
+    received: &Receiver<Request>,
+    known: &mut Option<Device>,
+    connected: &mut bool,
+) -> anyhow::Result<()> {
     let mut pulse = Pulse::connect("FlexFlyout")?;
     let mut events = Pulse::connect("FlexFlyout events")?;
     events.ack(&protocol::Command::Subscribe(
         protocol::SubscriptionMask::SINK | protocol::SubscriptionMask::SERVER,
     ))?;
-    let spawned = std::thread::Builder::new()
+    let mut device = pulse.default_device()?;
+    *connected = true;
+    match known.as_ref() {
+        None => {
+            log::info!("output device {:?}: {:?}", device.name, device.volume);
+            sink(device.volume, false);
+        }
+        // Another device or volume after the server came back: shown like
+        // any other change.
+        Some(old) if old.name != device.name || old.volume != device.volume => {
+            log::info!(
+                "connected to the sound server again; output device {:?}: {:?}",
+                device.name,
+                device.volume
+            );
+            sink(device.volume, true);
+        }
+        Some(_) => log::info!("connected to the sound server again"),
+    }
+    *known = Some(device.clone());
+
+    // The events are read on a thread of their own (reading blocks). It
+    // ends, telling why, when the connection breaks; events that came
+    // since the subscription wait in its socket.
+    let to_volume = requests.clone();
+    std::thread::Builder::new()
         .name("volume-events".into())
         .spawn(move || {
             loop {
-                match events.event() {
-                    Ok(()) => {
-                        if requests.send(Request::Refresh).is_err() {
-                            return;
-                        }
-                    }
-                    Err(err) => {
-                        log::error!("the volume events stopped: {err:#}");
-                        return;
-                    }
+                if let Err(err) = events.event() {
+                    let _ = to_volume.send(Request::Lost(format!("{err:#}")));
+                    return;
+                }
+                if to_volume.send(Request::Refresh).is_err() {
+                    return;
                 }
             }
-        });
-    if let Err(err) = spawned {
-        log::error!("cannot watch the volume: {err}");
-    }
+        })
+        .context("cannot watch the volume")?;
 
-    let mut device = pulse.default_device()?;
-    log::info!("output device {:?}: {:?}", device.name, device.volume);
-    sink(device.volume, false);
     while let Ok(request) = received.recv() {
         // Bursts of events come for one change (and for unrelated ones,
         // like a stream starting): read once for all that are waiting.
@@ -117,10 +184,13 @@ fn run(sink: &Sink, requests: Sender<Request>, received: &Receiver<Request>) -> 
         while let Some(request) = next.take() {
             match request {
                 Request::Refresh => refresh = true,
+                Request::Lost(why) => anyhow::bail!("the sound server went away: {why}"),
                 Request::SetLevel(level) => {
-                    let raw = (level * protocol::Volume::NORM.as_u32() as f32).round() as u32;
+                    // The loudest channel at the level, the others as far
+                    // below it as they were (the balance stays).
+                    let target = (level * protocol::Volume::NORM.as_u32() as f32).round() as u32;
                     let mut volume = protocol::ChannelVolume::empty();
-                    for _ in 0..device.channels.max(1) {
+                    for raw in scaled(&device.channels, target) {
                         volume.push(protocol::Volume::from_u32_clamped(raw));
                     }
                     let set = pulse.ack(&protocol::Command::SetSinkVolume(
@@ -159,15 +229,40 @@ fn run(sink: &Sink, requests: Sender<Request>, received: &Receiver<Request>) -> 
                 continue;
             }
         };
-        if new.name != device.name {
-            log::info!("the default output device is now {:?}", new.name);
-        } else if new.volume == device.volume {
+        if new == device {
             continue;
         }
+        // A change of the balance alone is kept (for the next change from
+        // the volume bar) but not shown.
+        let shown = new.name != device.name || new.volume != device.volume;
+        if new.name != device.name {
+            log::info!("the default output device is now {:?}", new.name);
+        }
         device = new;
-        sink(device.volume, true);
+        *known = Some(device.clone());
+        if shown {
+            sink(device.volume, true);
+        }
     }
     Ok(())
+}
+
+/// The channel volumes that keep the balance of `channels` with the
+/// loudest one at `target` (how PulseAudio itself scales a volume). Every
+/// channel gets `target` when all are silent, as there is no balance left.
+fn scaled(channels: &[u32], target: u32) -> Vec<u32> {
+    let loudest = channels.iter().copied().max().unwrap_or(0);
+    if loudest == 0 {
+        return vec![target; channels.len().max(1)];
+    }
+    channels
+        .iter()
+        .map(|&raw| {
+            let raw = u64::from(raw) * u64::from(target);
+            // Rounded to the nearest; at most `target`, so it fits.
+            ((raw + u64::from(loudest) / 2) / u64::from(loudest)) as u32
+        })
+        .collect()
 }
 
 /// A connection to the sound server.
@@ -253,21 +348,43 @@ impl Pulse {
                 index: None,
                 name: Some(name.clone()),
             }))?;
-        // The loudest channel, as the desktop shows it; 100% is "normal".
-        let raw = info
+        let channels: Vec<u32> = info
             .cvolume
             .channels()
             .iter()
             .map(protocol::Volume::as_u32)
-            .max()
-            .unwrap_or(0);
+            .collect();
+        // The loudest channel, as the desktop shows it; 100% is "normal".
+        let raw = channels.iter().copied().max().unwrap_or(0);
         Ok(Device {
             name,
             volume: Volume {
                 level: raw as f32 / protocol::Volume::NORM.as_u32() as f32,
                 muted: info.muted,
             },
-            channels: info.cvolume.channels().len() as u8,
+            channels,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn setting_the_volume_keeps_the_balance() {
+        let norm = protocol::Volume::NORM.as_u32();
+        // Left at half of right: still half after the change.
+        assert_eq!(scaled(&[norm / 2, norm], norm / 4), [norm / 8, norm / 4]);
+        // Louder than before, and to silence.
+        assert_eq!(scaled(&[norm / 4, norm / 2], norm), [norm / 2, norm]);
+        assert_eq!(scaled(&[norm, norm / 2], 0), [0, 0]);
+        // Balanced channels stay balanced.
+        assert_eq!(scaled(&[300, 300, 300], 1000), [1000, 1000, 1000]);
+        // All silent (or unknown): every channel at the target.
+        assert_eq!(scaled(&[0, 0], 500), [500, 500]);
+        assert_eq!(scaled(&[], 500), [500]);
+        // The largest raw volumes do not overflow.
+        assert_eq!(scaled(&[u32::MAX, u32::MAX / 2], u32::MAX)[0], u32::MAX);
     }
 }
