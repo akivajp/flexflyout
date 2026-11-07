@@ -47,7 +47,7 @@ If you installed it from the manifest URL before, switch to the bucket as its RE
 
 Or download `flexflyout-<version>-x86_64-pc-windows-msvc.zip` from the [Releases](https://github.com/akivajp/flexflyout/releases) page, extract it anywhere and run `flexflyout.exe` (`SHA256SUMS` lists the checksum). The release is not code-signed yet, so Windows SmartScreen may warn the first time: choose **More info** → **Run anyway**.
 
-FlexFlyout runs in the notification area (the tray). Its menu shows the flyout, opens the settings window, turns **Start with Windows** on or off, and quits. Starting FlexFlyout again while it runs opens the settings window. The settings are saved in `%APPDATA%\flexflyout\config.toml`, which can also be edited by hand (it is applied within a second of saving). `flexflyout --help` lists the command-line options; `flexflyout --demo` shows sample tracks.
+FlexFlyout runs in the notification area (the tray); its icon's tooltip shows the track that plays. Its menu shows the flyout, opens the settings window, turns **Start with Windows** on or off, and quits. Starting FlexFlyout again while it runs opens the settings window. The settings are saved in `%APPDATA%\flexflyout\config.toml`, which can also be edited by hand (it is applied within a second of saving). `flexflyout --help` lists the command-line options; `flexflyout --demo` shows sample tracks.
 
 ### Uninstall
 
@@ -70,7 +70,7 @@ cd flexflyout/packaging/aur/flexflyout-bin && makepkg -si
 
 Elsewhere (glibc 2.35 or newer), download `flexflyout-<version>-x86_64-unknown-linux-gnu.tar.gz` from the [Releases](https://github.com/akivajp/flexflyout/releases) page and put `flexflyout` on your `PATH`; `flexflyout.desktop` and `flexflyout.png` go to `~/.local/share/applications` and `~/.local/share/icons/hicolor/256x256/apps` for a menu entry.
 
-Start it from the menu or with `flexflyout`; starting it again while it runs opens the settings window. The tray icon (on KDE Plasma) has the same menu as on Windows, with **Start at login** instead. The settings are in `~/.config/flexflyout/config.toml` and the log in `~/.local/state/flexflyout/`. As on Windows, FlexFlyout stays clear of KDE Plasma's own volume popup, or hides it (the volume popup only; Plasma's brightness and other popups stay) while it runs.
+Start it from the menu or with `flexflyout`; starting it again while it runs opens the settings window. The tray icon (on KDE Plasma) has the same menu and tooltip as on Windows, with **Start at login** instead. The settings are in `~/.config/flexflyout/config.toml` and the log in `~/.local/state/flexflyout/`. As on Windows, FlexFlyout stays clear of KDE Plasma's own volume popup, or hides it (the volume popup only; Plasma's brightness and other popups stay) while it runs.
 
 To remove it: turn **Start at login** off (or delete `~/.config/autostart/flexflyout.desktop`), uninstall the package (`sudo pacman -R flexflyout-bin`) or delete the files, and delete `~/.config/flexflyout` and `~/.local/state/flexflyout` if you like.
 

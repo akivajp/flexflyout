@@ -28,6 +28,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
 };
 use windows::core::{HSTRING, PCWSTR, w};
 
+use flexflyout_core::NowPlaying;
 use flexflyout_core::update::Release;
 
 use crate::i18n::TrayLabels;
@@ -52,6 +53,9 @@ const UPDATE_ID: usize = 7;
 
 /// A newer release, offered at the top of the menu.
 static UPDATE: Mutex<Option<Release>> = Mutex::new(None);
+
+/// What plays, in one line, shown under the app's name in the icon's tip.
+static PLAYING: Mutex<Option<String>> = Mutex::new(None);
 
 /// The message the icon sends to the window.
 const WM_TRAY: u32 = WM_APP + 1;
@@ -109,20 +113,78 @@ pub fn offer_update(release: &Release, notice: Option<(String, String)>) {
     let mut data = icon_data(HWND(hwnd as *mut _));
     data.uFlags = NIF_INFO;
     data.dwInfoFlags = NIIF_INFO;
-    // Cut to the fixed buffers, keeping the terminating zero.
-    let copy = |slot: &mut [u16], text: &str| {
-        let len = slot.len() - 1;
-        for (slot, unit) in slot[..len].iter_mut().zip(text.encode_utf16()) {
-            *slot = unit;
-        }
-    };
-    copy(&mut data.szInfoTitle, &title);
-    copy(&mut data.szInfo, &text);
+    copy_text(&mut data.szInfoTitle, &title);
+    copy_text(&mut data.szInfo, &text);
     // SAFETY: modifies our own icon; callable from any thread.
     if !unsafe { Shell_NotifyIconW(NIM_MODIFY, &data) }.as_bool() {
         log::warn!("cannot show the notification");
     }
 }
+
+/// Shows what plays in the icon's tip (`None`: nothing). Called for every
+/// update of the track; the icon changes only when the title or the artist
+/// does.
+pub fn set_now_playing(now_playing: Option<&NowPlaying>) {
+    let summary = now_playing.and_then(NowPlaying::summary);
+    {
+        let mut playing = PLAYING.lock().unwrap_or_else(PoisonError::into_inner);
+        if *playing == summary {
+            return;
+        }
+        *playing = summary;
+    }
+    let hwnd = WINDOW.load(Ordering::Acquire);
+    if hwnd == 0 {
+        return; // The icon gets the tip when it is added.
+    }
+    let mut data = icon_data(HWND(hwnd as *mut _));
+    data.uFlags = NIF_TIP;
+    // SAFETY: modifies our own icon; callable from any thread.
+    if !unsafe { Shell_NotifyIconW(NIM_MODIFY, &data) }.as_bool() {
+        log::warn!("cannot change the tray icon's tip");
+    }
+}
+
+/// The icon's tip: the app's name, and what plays below it.
+fn tip() -> String {
+    match PLAYING
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .as_deref()
+    {
+        Some(track) => format!("FlexFlyout\n{track}"),
+        None => "FlexFlyout".to_owned(),
+    }
+}
+
+/// Copies `text` into a fixed buffer of UTF-16, keeping the terminating
+/// zero. Text that does not fit is cut, never inside a character, and ends
+/// with "…".
+fn copy_text(slot: &mut [u16], text: &str) {
+    let Some(room) = slot.len().checked_sub(1) else {
+        return;
+    };
+    let units: Vec<u16> = text.encode_utf16().collect();
+    let mut used = if units.len() <= room {
+        units.len()
+    } else {
+        // Room for the ellipsis, and not between the halves of a pair.
+        let mut cut = room.saturating_sub(1);
+        if cut > 0 && (0xD800..0xDC00).contains(&units[cut - 1]) {
+            cut -= 1;
+        }
+        cut
+    };
+    slot[..used].copy_from_slice(&units[..used]);
+    if used < units.len() && used < room {
+        slot[used] = ELLIPSIS;
+        used += 1;
+    }
+    slot[used] = 0;
+}
+
+/// "…" in UTF-16.
+const ELLIPSIS: u16 = 0x2026;
 
 /// Opens the page of the release on offer, if any.
 fn open_update() {
@@ -266,9 +328,7 @@ fn icon_data(hwnd: HWND) -> NOTIFYICONDATAW {
         hIcon: icon(),
         ..Default::default()
     };
-    for (slot, unit) in data.szTip.iter_mut().zip("FlexFlyout".encode_utf16()) {
-        *slot = unit;
-    }
+    copy_text(&mut data.szTip, &tip());
     data
 }
 
@@ -474,4 +534,33 @@ fn in_bars(x: f32, y: f32) -> bool {
     [(7.0, 17.0), (13.5, 12.0), (20.0, 7.0)]
         .iter()
         .any(|&(left, top)| (left..left + 5.0).contains(&x) && (top..25.0).contains(&y))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The text in a buffer, up to its terminating zero.
+    fn read(slot: &[u16]) -> String {
+        let end = slot.iter().position(|&unit| unit == 0).expect("terminated");
+        String::from_utf16(&slot[..end]).expect("whole characters")
+    }
+
+    #[test]
+    fn texts_are_cut_to_their_buffers() {
+        let mut slot = [0xFFFF_u16; 8];
+        copy_text(&mut slot, "Song");
+        assert_eq!(read(&slot), "Song");
+        // Seven units fit; a longer text keeps six and an ellipsis.
+        copy_text(&mut slot, "A longer title");
+        assert_eq!(read(&slot), "A long…");
+        // Never between the halves of a surrogate pair (𝄞 takes two).
+        copy_text(&mut slot, "abcde𝄞fg");
+        assert_eq!(read(&slot), "abcde…");
+        copy_text(&mut slot, "abcdefg");
+        assert_eq!(read(&slot), "abcdefg");
+        let mut tiny = [0xFFFF_u16; 1];
+        copy_text(&mut tiny, "x");
+        assert_eq!(read(&tiny), "");
+    }
 }

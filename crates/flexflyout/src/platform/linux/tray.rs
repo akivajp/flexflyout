@@ -4,6 +4,7 @@
 
 use std::sync::{Mutex, OnceLock, PoisonError};
 
+use flexflyout_core::NowPlaying;
 use flexflyout_core::update::Release;
 use ksni::blocking::TrayMethods as _;
 
@@ -16,11 +17,16 @@ static HANDLE: OnceLock<ksni::blocking::Handle<Tray>> = OnceLock::new();
 /// A newer release offered before the icon was there.
 static UPDATE: Mutex<Option<Release>> = Mutex::new(None);
 
+/// What plays, in one line (kept also before the icon is there).
+static PLAYING: Mutex<Option<String>> = Mutex::new(None);
+
 /// The icon's state, read by the D-Bus service.
 struct Tray {
     labels: TrayLabels,
     /// A newer release, offered at the top of the menu.
     update: Option<Release>,
+    /// What plays, shown in the tooltip.
+    playing: Option<String>,
     on_command: Box<dyn Fn(TrayCommand) + Send + Sync>,
     icon: Vec<ksni::Icon>,
 }
@@ -30,6 +36,10 @@ pub fn spawn(labels: TrayLabels, on_command: impl Fn(TrayCommand) + Send + Sync 
     let tray = Tray {
         labels,
         update: UPDATE
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone(),
+        playing: PLAYING
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .clone(),
@@ -50,6 +60,23 @@ pub fn spawn(labels: TrayLabels, on_command: impl Fn(TrayCommand) + Send + Sync 
 pub fn set_labels(labels: TrayLabels) {
     if let Some(handle) = HANDLE.get() {
         handle.update(|tray| tray.labels = labels);
+    }
+}
+
+/// Shows what plays in the tooltip (`None`: nothing). Called for every
+/// update of the track; the icon changes only when the title or the artist
+/// does.
+pub fn set_now_playing(now_playing: Option<&NowPlaying>) {
+    let summary = now_playing.and_then(NowPlaying::summary);
+    {
+        let mut playing = PLAYING.lock().unwrap_or_else(PoisonError::into_inner);
+        if *playing == summary {
+            return;
+        }
+        playing.clone_from(&summary);
+    }
+    if let Some(handle) = HANDLE.get() {
+        handle.update(move |tray| tray.playing = summary);
     }
 }
 
@@ -78,6 +105,7 @@ impl ksni::Tray for Tray {
     fn tool_tip(&self) -> ksni::ToolTip {
         ksni::ToolTip {
             title: "FlexFlyout".into(),
+            description: self.playing.clone().unwrap_or_default(),
             ..Default::default()
         }
     }

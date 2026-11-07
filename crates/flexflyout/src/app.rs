@@ -361,6 +361,7 @@ fn start_sources(
         }));
     });
     let media = media::spawn(move |now_playing, change| {
+        tray::set_now_playing(now_playing.as_ref());
         send(Message::NowPlaying(now_playing));
         match change {
             Change::NewTrack => send(Message::show(Trigger::TrackChange)),

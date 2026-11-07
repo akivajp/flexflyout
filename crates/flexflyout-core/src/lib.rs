@@ -57,6 +57,18 @@ impl NowPlaying {
         self.title == other.title && self.artist == other.artist
     }
 
+    /// The track in one line, "Title — Artist" (just the title without an
+    /// artist), for a tooltip; `None` while the player tells no title.
+    pub fn summary(&self) -> Option<String> {
+        let title = self.title.trim();
+        let artist = self.artist.trim();
+        match (title.is_empty(), artist.is_empty()) {
+            (true, _) => None,
+            (false, true) => Some(title.to_owned()),
+            (false, false) => Some(format!("{title} — {artist}")),
+        }
+    }
+
     /// Where playback is at `now`: the position the player last reported,
     /// moved on by the time since then while playing (players report it only
     /// now and then). `None` without a timeline.
@@ -280,6 +292,22 @@ mod tests {
         assert_eq!(Change::between(Some(&playing), None), Change::Other);
         // A player that has not told the title yet.
         assert_eq!(Change::between(None, Some(&untitled)), Change::Other);
+    }
+
+    #[test]
+    fn the_summary_names_the_track_and_the_artist() {
+        let track = |title: &str, artist: &str| NowPlaying {
+            title: title.into(),
+            artist: artist.into(),
+            ..NowPlaying::default()
+        };
+        assert_eq!(
+            track("Song", "Band").summary().as_deref(),
+            Some("Song — Band")
+        );
+        // A video without an artist, and a player that has told nothing.
+        assert_eq!(track(" Video ", "").summary().as_deref(), Some("Video"));
+        assert_eq!(track("", "Band").summary(), None);
     }
 
     #[test]
