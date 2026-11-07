@@ -97,6 +97,7 @@ pub fn run(
             }
         })
         .map_err(|err| anyhow::anyhow!("cannot receive messages: {err}"))?;
+    quit_on_signals(sender.clone());
 
     let ctx = egui::Context::default();
     ctx.options_mut(|options| options.zoom_with_keyboard = false);
@@ -341,6 +342,48 @@ fn start_sources(
         }
     });
     Controls { media, volume }
+}
+
+/// How long the event loop has to end the app after a signal, before the
+/// signal's thread ends it.
+const SIGNAL_GRACE: Duration = Duration::from_secs(3);
+
+/// Closes the app as Quit in the tray menu does when it is asked to end:
+/// SIGTERM (the session ends at logout, or `kill`), SIGINT (Ctrl+C) or
+/// SIGHUP (its terminal closed). Without this the process just ends, and
+/// Plasma's volume popup, if FlexFlyout hid it, stays hidden until the next
+/// start. Should the event loop not end in time (it is stuck), the popup is
+/// brought back and the process ended from the signal's thread.
+fn quit_on_signals(sender: Sender<Message>) {
+    use async_signal::{Signal, Signals};
+    use futures_lite::StreamExt as _;
+
+    let mut signals = match Signals::new([Signal::Term, Signal::Int, Signal::Hup]) {
+        Ok(signals) => signals,
+        Err(err) => {
+            log::warn!("cannot watch for signals to end: {err}");
+            return;
+        }
+    };
+    let spawned = std::thread::Builder::new()
+        .name("signals".into())
+        .spawn(move || {
+            match futures_lite::future::block_on(signals.next()) {
+                Some(Ok(signal)) => log::info!("{signal:?} received: closing"),
+                other => {
+                    log::warn!("stopped watching for signals: {other:?}");
+                    return;
+                }
+            }
+            let _ = sender.send(Message::Quit);
+            std::thread::sleep(SIGNAL_GRACE);
+            log::warn!("still running {SIGNAL_GRACE:?} after the signal: ending at once");
+            native_osd::restore();
+            std::process::exit(1);
+        });
+    if let Err(err) = spawned {
+        log::warn!("cannot watch for signals to end: {err}");
+    }
 }
 
 /// The earlier of two optional waits.

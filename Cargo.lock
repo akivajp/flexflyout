@@ -1142,12 +1142,14 @@ name = "flexflyout"
 version = "0.6.0"
 dependencies = [
  "anyhow",
+ "async-signal",
  "clap",
  "eframe",
  "egui",
  "egui-wgpu",
  "flexflyout-core",
  "flexflyout-ui",
+ "futures-lite",
  "i18n-embed",
  "i18n-embed-fl",
  "image",

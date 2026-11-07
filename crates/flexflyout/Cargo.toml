@@ -64,6 +64,10 @@ windows = { version = "0.62", features = [
 # compositor, egui-wgpu for drawing. Everything is pure Rust or opened at
 # run time, so no development packages are needed to build.
 [target.'cfg(target_os = "linux")'.dependencies]
+# Closing as Quit does when the session ends (SIGTERM at logout), so that
+# Plasma's volume popup comes back. Both come with zbus already.
+async-signal = "0.2"
+futures-lite = "2"
 egui = "0.37"
 # The settings window is a normal window, which winit can make.
 eframe = { version = "0.37", default-features = false, features = ["wgpu", "wayland", "x11"] }
