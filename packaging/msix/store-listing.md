@@ -12,7 +12,7 @@ What to enter in Partner Center for FlexFlyout (Apps and games > FlexFlyout > St
 ## Properties
 
 - **Category**: Utilities & tools.
-- **Privacy policy URL**: <https://github.com/akivajp/flexflyout#privacy>
+- **Privacy policy**: choose that the app uses personal information, and give <https://github.com/akivajp/flexflyout#privacy>. FlexFlyout keeps nothing, but its low-level keyboard hook receives every key press (it only looks at the volume and media keys), which the Store's policy may count as accessing personal information; the README's Privacy section says exactly what it does.
 - **Website**: <https://github.com/akivajp/flexflyout>
 - **Support contact info**: <https://github.com/akivajp/flexflyout/issues>
 - **Product declarations**: leave "accessibility guidelines" unchecked (not tested with the Store's checklist); keep "Customers can install this app to alternate drives" checked; leave "depends on non-Microsoft drivers or NT services" unchecked.
