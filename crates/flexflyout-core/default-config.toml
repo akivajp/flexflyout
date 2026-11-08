@@ -21,7 +21,7 @@ native_osd = "avoid"
 # Also show the flyout when the player starts or pauses, from the player's
 # own window or from the buttons of Bluetooth headphones (a new track, a
 # volume change and the media keys always show it).
-show_on_play_pause = true
+show_on_play_pause = false
 
 # Ask GitHub (api.github.com) once a day whether a newer version is out, and
 # say so in the tray menu and with a notification. Nothing is downloaded or

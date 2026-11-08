@@ -7,6 +7,11 @@ include breaking changes).
 
 ## [Unreleased]
 
+### Changed
+- Starting or pausing playback no longer shows the flyout by default
+  (`general.show_on_play_pause = false`; a settings file that says `true`
+  keeps it). The media keys still show it.
+
 ## [0.7.0] - 2026-11-08
 
 ### Added

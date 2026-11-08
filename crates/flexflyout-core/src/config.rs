@@ -155,7 +155,7 @@ impl Default for General {
         Self {
             language: "auto".to_owned(),
             native_osd: NativeOsd::default(),
-            show_on_play_pause: true,
+            show_on_play_pause: false,
             check_updates: true,
             show_over_fullscreen: true,
         }
