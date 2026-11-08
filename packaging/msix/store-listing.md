@@ -50,6 +50,8 @@ The screenshots were taken from the MSIX package (so the settings window has no 
 | 3 | `en-3-new-track.png` | `ja-3-new-track.png` | A small panel for a new track; click it for the whole flyout / 新しい曲は小さな表示で。クリックで全体を表示 |
 | 4 | `en-4-light.png` | `ja-4-light.png` | Light or dark, following Windows if you like / 明るい色・暗い色。Windows に合わせることも |
 
+Store logos (optional): the 1:1 box art (`store-box-1080.png` / `store-box-2160.png` in `tmp/store-shots/`, made by `tmp/make_store_art.py` from the icon SVG) improves how the app looks in the Store's layouts; the 9:16 poster art is needed only on Xbox (`store-poster-*.png`, if wanted); the tile icons (300/150/71) can stay empty, as the package's images are used.
+
 ### English (United States)
 
 **Product name**: FlexFlyout
