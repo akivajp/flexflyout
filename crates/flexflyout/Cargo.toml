@@ -91,6 +91,9 @@ smithay-client-toolkit = { version = "0.21", default-features = false, features 
 wayland-backend = { version = "0.3", features = ["client_system", "dlopen"] }
 wayland-client = "0.31"
 wayland-protocols = { version = "0.32", features = ["client", "unstable"] }
+# KDE Plasma's order of the outputs, to find the primary one (winit uses
+# the same crate).
+wayland-protocols-plasma = { version = "0.3", features = ["client"] }
 wgpu = { version = "30", default-features = false, features = ["std", "wgsl", "vulkan", "gles"] }
 ureq = "3"
 # MPRIS, the players' D-Bus interface.

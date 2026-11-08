@@ -37,7 +37,10 @@ use smithay_client_toolkit::shell::wlr_layer::{
 use smithay_client_toolkit::{delegate_registry, registry_handlers};
 use wayland_client::globals::GlobalList;
 use wayland_client::protocol::{wl_output, wl_pointer, wl_seat, wl_surface};
-use wayland_client::{Connection, Proxy, QueueHandle};
+use wayland_client::{Connection, Dispatch, Proxy, QueueHandle};
+use wayland_protocols_plasma::output_order::v1::client::kde_output_order_v1::{
+    self, KdeOutputOrderV1,
+};
 
 /// Mouse buttons in Linux input event codes.
 const BTN_LEFT: u32 = 0x110;
@@ -275,6 +278,40 @@ struct Shown {
     scale: i32,
 }
 
+/// The outputs in the order the desktop places its things on them, the
+/// primary one first. KDE Plasma tells it (kde_output_order_v1, a
+/// protocol of its own); other compositors have no primary output.
+#[derive(Debug, Default)]
+struct OutputOrder {
+    /// The list being received.
+    pending: Vec<String>,
+    /// The last complete list.
+    names: Vec<String>,
+}
+
+impl OutputOrder {
+    /// Takes in an event of the protocol. Returns whether a list is now
+    /// complete.
+    fn take(&mut self, event: kde_output_order_v1::Event) -> bool {
+        match event {
+            kde_output_order_v1::Event::Output { output_name } => {
+                self.pending.push(output_name);
+                false
+            }
+            kde_output_order_v1::Event::Done => {
+                self.names = std::mem::take(&mut self.pending);
+                true
+            }
+            _ => false,
+        }
+    }
+
+    /// The primary output's name, if it is known.
+    fn primary(&self) -> Option<&str> {
+        self.names.first().map(String::as_str)
+    }
+}
+
 /// The Wayland side of the flyout.
 pub struct Wayland {
     connection: Connection,
@@ -317,6 +354,10 @@ pub struct Wayland {
     /// A drag that ended since the host last asked.
     move_ended: Option<(i32, i32)>,
     started: Instant,
+    /// The order of the outputs, where the compositor tells it, and the
+    /// object that receives it (kept alive for its changes).
+    order: OutputOrder,
+    _order_source: Option<KdeOutputOrderV1>,
 }
 
 impl Wayland {
@@ -339,6 +380,10 @@ impl Wayland {
             wgpu::InstanceDescriptor::new_with_display_handle_from_env(Box::new(display)),
         );
         let relative = RelativePointerState::bind(globals, &queue);
+        // Only KDE Plasma has it; the primary output is unknown elsewhere.
+        let order_source = globals
+            .bind::<KdeOutputOrderV1, _, _>(&queue, 1..=1, ())
+            .ok();
         Ok(Self {
             registry: RegistryState::new(globals),
             outputs: OutputState::new(globals, &queue),
@@ -363,6 +408,8 @@ impl Wayland {
             dragged: (0, 0),
             move_ended: None,
             started: Instant::now(),
+            order: OutputOrder::default(),
+            _order_source: order_source,
         })
     }
 
@@ -379,6 +426,13 @@ impl Wayland {
             .or_else(|| self.entered.clone())
             .or_else(|| self.outputs.outputs().next())?;
         self.outputs.info(&output)?.logical_size
+    }
+
+    /// The primary output by its index (as [`Placement::output`] counts
+    /// them), where the compositor tells which one it is (KDE Plasma).
+    pub fn primary_output(&self) -> Option<usize> {
+        let primary = self.order.primary()?;
+        self.output_names().iter().position(|name| name == primary)
     }
 
     /// The outputs' names, in the order [`Placement::output`] counts them.
@@ -1025,6 +1079,24 @@ fn wheel_event(
     })
 }
 
+impl Dispatch<KdeOutputOrderV1, ()> for Wayland {
+    fn event(
+        state: &mut Self,
+        _: &KdeOutputOrderV1,
+        event: kde_output_order_v1::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+        if state.order.take(event) {
+            log::info!(
+                "the outputs in order, primary first: {:?}",
+                state.order.names
+            );
+        }
+    }
+}
+
 impl RelativePointerHandler for Wayland {
     fn relative_pointer_motion(
         &mut self,
@@ -1051,7 +1123,8 @@ delegate_registry!(Wayland);
 smithay_client_toolkit::delegate_dispatch2!(Wayland);
 
 /// The monitors, as the settings window lists them: their positions and
-/// sizes in logical pixels, in the order [`Placement::output`] counts them.
+/// sizes in logical pixels, in the order [`Placement::output`] counts them,
+/// with the primary one marked where the compositor tells it (KDE Plasma).
 /// Empty without a Wayland session.
 pub fn outputs() -> Vec<flexflyout_core::layout::MonitorArea> {
     use flexflyout_core::layout::{MonitorArea, PixelRect};
@@ -1060,6 +1133,19 @@ pub fn outputs() -> Vec<flexflyout_core::layout::MonitorArea> {
     struct Outputs {
         registry: RegistryState,
         outputs: OutputState,
+        order: OutputOrder,
+    }
+    impl Dispatch<KdeOutputOrderV1, ()> for Outputs {
+        fn event(
+            state: &mut Self,
+            _: &KdeOutputOrderV1,
+            event: kde_output_order_v1::Event,
+            _: &(),
+            _: &Connection,
+            _: &QueueHandle<Self>,
+        ) {
+            state.order.take(event);
+        }
     }
     impl OutputHandler for Outputs {
         fn output_state(&mut self) -> &mut OutputState {
@@ -1092,10 +1178,16 @@ pub fn outputs() -> Vec<flexflyout_core::layout::MonitorArea> {
         let mut state = Outputs {
             registry: RegistryState::new(&globals),
             outputs: OutputState::new(&globals, &queue.handle()),
+            order: OutputOrder::default(),
         };
-        // The outputs' details arrive after their announcement.
+        let _order = globals
+            .bind::<KdeOutputOrderV1, _, _>(&queue.handle(), 1..=1, ())
+            .ok();
+        // The outputs' details and their order arrive after their
+        // announcement.
         queue.roundtrip(&mut state).ok()?;
         queue.roundtrip(&mut state).ok()?;
+        let primary = state.order.primary().map(str::to_owned);
         Some(
             state
                 .outputs
@@ -1109,7 +1201,7 @@ pub fn outputs() -> Vec<flexflyout_core::layout::MonitorArea> {
                         bounds,
                         work: bounds,
                         scale: info.scale_factor as f32,
-                        primary: false,
+                        primary: primary.is_some() && info.name == primary,
                     }
                 })
                 .collect(),
@@ -1197,6 +1289,27 @@ mod tests {
             Some((1920, 1080)),
         );
         assert_eq!(p.margins, (0, 0, -12, 784));
+    }
+
+    #[test]
+    fn the_output_order_names_the_primary_output_first() {
+        let output = |name: &str| kde_output_order_v1::Event::Output {
+            output_name: name.into(),
+        };
+        let mut order = OutputOrder::default();
+        assert_eq!(order.primary(), None);
+        assert!(!order.take(output("DP-2")));
+        assert!(!order.take(output("HDMI-A-1")));
+        // Only a complete list counts.
+        assert_eq!(order.primary(), None);
+        assert!(order.take(kde_output_order_v1::Event::Done));
+        assert_eq!(order.primary(), Some("DP-2"));
+        // A new list replaces it when it is complete.
+        order.take(output("HDMI-A-1"));
+        assert_eq!(order.primary(), Some("DP-2"));
+        order.take(output("DP-2"));
+        order.take(kde_output_order_v1::Event::Done);
+        assert_eq!(order.primary(), Some("HDMI-A-1"));
     }
 
     #[test]

@@ -233,13 +233,15 @@ impl Host {
             }
             Animation::Fade => (0, 0),
         };
-        // The compositor picks the monitor for "primary" and "cursor" (KWin
-        // shows it on the active one); a number names one.
+        // A number names the output. KDE Plasma tells which is the primary
+        // one; elsewhere, and for "cursor", the compositor picks it (KWin:
+        // the active one, which follows the mouse pointer).
         let output = match display.monitor {
             Monitor::Number(n) => {
                 Some(n as usize - 1).filter(|&i| i < self.wayland.output_names().len())
             }
-            Monitor::Primary | Monitor::Cursor => None,
+            Monitor::Primary => self.wayland.primary_output(),
+            Monitor::Cursor => None,
         };
         let area = self.wayland.output_size(output);
         let mut placement = layer::placement(display, size, slide, area);

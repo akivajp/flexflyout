@@ -52,6 +52,12 @@ include breaking changes).
   answers "not ready" while it sets up) showed as nothing playing, and
   the same track then came up again as a new one. It is now read again a
   moment later, and the flyout keeps what it showed meanwhile.
+- KDE Plasma: `monitor = "primary"` (the default) left the choice to KWin,
+  which shows the flyout on the active screen (where the mouse pointer
+  is), not on the primary one. FlexFlyout now asks Plasma for its screen
+  order and puts it on the primary screen, and the settings window marks
+  that screen as the primary one. Other compositors have no primary
+  screen and choose as before.
 - Linux: after the sound server restarted (PipeWire does after an update,
   or when restarted to fix a Bluetooth device), or when it was not up yet
   at login, the flyout no longer followed the volume. FlexFlyout now
