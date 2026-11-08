@@ -33,9 +33,9 @@ Upload `flexflyout-vX.Y.Z-x64.msix` from the release workflow's `flexflyout-msix
 
   > FlexFlyout is a tray (notification area) app without a main window. To see it, change the volume (keyboard keys or the volume slider), press a media key, or start playing something in Media Player or a web browser: the flyout appears at the top right of the primary monitor for a few seconds. Its tray icon (in the overflow area behind the ^ next to the clock) has a menu with "Show the flyout", "Settings…" and "Quit". No account, sign-in or test data is needed.
 
-- **Restricted capabilities** (`runFullTrust`):
+- **Restricted capabilities** (`runFullTrust`, 500 characters at most):
 
-  > FlexFlyout is a desktop (Win32) app. It needs full trust to watch the volume and media keys with a low-level keyboard hook (to show the flyout when they are pressed, even at 0% or 100% volume, where the volume does not change), to read and set the volume through Core Audio, to read the media sessions (SMTC), to show a tray icon, and to show a topmost window that does not take the focus. It also detects Windows' own volume indicator to place the flyout clear of it, and, only if the user chooses so in the settings, hides it while FlexFlyout runs (it comes back when FlexFlyout quits).
+  > FlexFlyout is a desktop (Win32) app. It needs full trust for a low-level keyboard hook that watches only the volume and media keys (to show the flyout even at 0% or 100% volume), Core Audio (volume), the media sessions (SMTC), a tray icon, and a topmost window that takes no focus. It also finds Windows' volume indicator to keep clear of it, and hides it only if the user asks to (restored when FlexFlyout quits).
 
 ## Store listings
 
