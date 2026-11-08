@@ -5,7 +5,10 @@
 
 use std::time::{Duration, Instant};
 
-use flexflyout_core::{Command, Config, FlyoutTimer, NowPlaying, PlaybackStatus, Theme, Volume};
+use flexflyout_core::config::{Display, NewTrack};
+use flexflyout_core::{
+    Command, Config, FlyoutTimer, NewTrackShow, NowPlaying, PlaybackStatus, Player, Theme, Volume,
+};
 use flexflyout_ui::{FlyoutView, Labels};
 
 use crate::message::{Message, Trigger};
@@ -17,6 +20,50 @@ pub const HOVER_CHECK: Duration = Duration::from_millis(200);
 /// How often the shown flyout is drawn again while a track plays, to move
 /// its position bar on.
 pub const POSITION_REFRESH: Duration = Duration::from_millis(250);
+
+/// Which panel an appearance shows.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Mode {
+    /// The whole flyout.
+    #[default]
+    Full,
+    /// The small panel of a new track.
+    Compact,
+}
+
+/// The panel to show for `trigger`, when `shown` is the one showing now
+/// (`None`: hidden), or `None` to show nothing. A new track shows what the
+/// settings say, unless the whole flyout is up already (it then shows the
+/// new track itself); everything else shows the whole flyout.
+pub fn mode_for(trigger: Trigger, new_track: NewTrackShow, shown: Option<Mode>) -> Option<Mode> {
+    if trigger != Trigger::TrackChange || shown == Some(Mode::Full) {
+        return Some(Mode::Full);
+    }
+    match new_track {
+        NewTrackShow::Compact => Some(Mode::Compact),
+        NewTrackShow::Flyout => Some(Mode::Full),
+        // A small panel already up for an earlier track shows this one.
+        NewTrackShow::Nothing => shown,
+    }
+}
+
+/// The panel that previews new settings: the small one when its settings
+/// changed (and it is in use), else the whole flyout.
+pub fn preview_mode(old: &NewTrack, new: &NewTrack) -> Mode {
+    if old != new && new.show == NewTrackShow::Compact {
+        Mode::Compact
+    } else {
+        Mode::Full
+    }
+}
+
+/// The placement settings of a panel: the flyout's, or the small panel's.
+pub fn display_for(config: &Config, mode: Mode) -> Display {
+    match mode {
+        Mode::Full => config.display.clone(),
+        Mode::Compact => config.new_track.display(&config.display),
+    }
+}
 
 /// The flyout's state.
 pub struct FlyoutState {
@@ -32,6 +79,11 @@ pub struct FlyoutState {
     system_theme: Theme,
     /// When the user last moved the position with the flyout's bar.
     seeked: Option<Instant>,
+    /// The panel of the current (or last) appearance.
+    pub mode: Mode,
+    /// The players there are, and the one whose track is shown.
+    pub players: Vec<Player>,
+    pub current_player: Option<String>,
 }
 
 /// What a message changed, for the host to act on.
@@ -65,7 +117,42 @@ impl FlyoutState {
             pinned: false,
             system_theme: Theme::Dark,
             seeked: None,
+            mode: Mode::Full,
+            players: Vec::new(),
+            current_player: None,
         }
+    }
+
+    /// The panel showing at `now`, if any.
+    pub fn shown_mode(&self, now: Instant) -> Option<Mode> {
+        self.timer.is_active(now).then_some(self.mode)
+    }
+
+    /// The size setting of the current panel (egui's zoom factor).
+    pub fn scale(&self) -> f32 {
+        display_for(&self.config, self.mode).scale
+    }
+
+    /// Shows `mode`, with its timing (or keeps it shown longer).
+    fn show(&mut self, mode: Mode, now: Instant) {
+        self.mode = mode;
+        let timing = match mode {
+            Mode::Full => self.config.timing.timing(),
+            Mode::Compact => self.config.new_track.timing(&self.config.timing),
+        };
+        self.timer.set_timing(timing);
+        self.timer.trigger(now);
+    }
+
+    /// Follows the `choice`-th player of the list shown (`None`: whichever
+    /// plays). Returns the settings before, for the host to save the
+    /// change against.
+    pub fn choose_player(&mut self, choice: Option<usize>) -> Config {
+        let before = self.config.clone();
+        self.config.general.player = choice
+            .and_then(|i| self.players.get(i))
+            .map_or_else(|| "auto".to_owned(), |player| player.id.clone());
+        before
     }
 
     /// Takes in a message from a source.
@@ -83,18 +170,33 @@ impl FlyoutState {
                 self.system_theme = theme;
                 Received::Content
             }
-            Message::Show { trigger, sent } => {
-                self.timer.trigger(now);
-                Received::Shown { trigger, sent }
+            Message::Players { players, current } => {
+                self.players = players;
+                self.current_player = current;
+                Received::Content
+            }
+            Message::Show {
+                trigger,
+                sent,
+                mode,
+            } => {
+                let shown = self.shown_mode(now);
+                match mode.or_else(|| mode_for(trigger, self.config.new_track.show, shown)) {
+                    Some(mode) => {
+                        self.show(mode, now);
+                        Received::Shown { trigger, sent }
+                    }
+                    None => Received::Content,
+                }
             }
             Message::Settings { config, labels } => {
-                self.timer.set_timing(config.timing.timing());
                 let old = std::mem::replace(&mut self.config, *config);
                 if let Some(labels) = labels {
-                    self.labels = labels;
+                    self.labels = *labels;
                 }
-                // Show the flyout with the new settings.
-                self.timer.trigger(now);
+                // Show the panel the change is about with the new settings.
+                let mode = preview_mode(&old.new_track, &self.config.new_track);
+                self.show(mode, now);
                 Received::Settings(Box::new(old))
             }
             Message::Quit => Received::Quit,
@@ -134,6 +236,9 @@ impl FlyoutState {
             appearance: &self.config.appearance,
             theme: self.config.appearance.theme.resolved(self.system_theme),
             labels: &self.labels,
+            players: &self.players,
+            player_choice: self.config.general.player(),
+            current_player: self.current_player.as_deref(),
         }
     }
 
@@ -167,7 +272,11 @@ impl FlyoutState {
                 self.timer.trigger(now);
                 None
             }
-            Command::StartMove | Command::OpenSettings => Some(command),
+            Command::StartMove | Command::OpenSettings | Command::ChoosePlayer(_) => Some(command),
+            Command::Expand => {
+                self.show(Mode::Full, now);
+                Some(command)
+            }
             Command::SetVolume(level) => {
                 // Show the new level at once rather than when the system
                 // reports it, so that the next step of a quickly turned
@@ -201,5 +310,52 @@ impl FlyoutState {
             new.timeline = old.timeline;
         }
         self.now_playing = new;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_new_track_shows_what_the_settings_say() {
+        use NewTrackShow::{Compact, Flyout, Nothing};
+        let track = Trigger::TrackChange;
+        // Hidden: by the setting.
+        assert_eq!(mode_for(track, Compact, None), Some(Mode::Compact));
+        assert_eq!(mode_for(track, Flyout, None), Some(Mode::Full));
+        assert_eq!(mode_for(track, Nothing, None), None);
+        // The whole flyout up already: it shows the new track.
+        for show in [Compact, Flyout, Nothing] {
+            assert_eq!(mode_for(track, show, Some(Mode::Full)), Some(Mode::Full));
+        }
+        // The small panel up: it shows the next one too.
+        assert_eq!(
+            mode_for(track, Nothing, Some(Mode::Compact)),
+            Some(Mode::Compact)
+        );
+        // Everything else shows the whole flyout, also over the small panel.
+        for trigger in [Trigger::VolumeKey, Trigger::VolumeChange, Trigger::Tray] {
+            assert_eq!(
+                mode_for(trigger, Compact, Some(Mode::Compact)),
+                Some(Mode::Full)
+            );
+        }
+    }
+
+    #[test]
+    fn settings_preview_the_panel_they_change() {
+        let old = NewTrack::default();
+        assert_eq!(preview_mode(&old, &old), Mode::Full);
+        let longer = NewTrack {
+            hold_ms: 5000,
+            ..NewTrack::default()
+        };
+        assert_eq!(preview_mode(&old, &longer), Mode::Compact);
+        let off = NewTrack {
+            show: NewTrackShow::Nothing,
+            ..NewTrack::default()
+        };
+        assert_eq!(preview_mode(&old, &off), Mode::Full);
     }
 }

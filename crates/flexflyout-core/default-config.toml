@@ -19,9 +19,15 @@ language = "auto"
 native_osd = "avoid"
 
 # Also show the flyout when the player starts or pauses, from the player's
-# own window or from the buttons of Bluetooth headphones (a new track, a
-# volume change and the media keys always show it).
+# own window or from the buttons of Bluetooth headphones (a volume change and
+# the media keys always show it).
 show_on_play_pause = false
+
+# The player to follow: "auto" (the one playing) or one player's ID, such as
+# "Spotify.exe" or "Chrome" on Windows and "spotify" or "firefox" on Linux
+# (the flyout's player button and the settings window list them). With one
+# chosen, the flyout shows and controls that player only.
+player = "auto"
 
 # Ask GitHub (api.github.com) once a day whether a newer version is out, and
 # say so in the tray menu and with a notification. Nothing is downloaded or
@@ -90,3 +96,24 @@ show_cover_art = true
 show_position = true
 show_shuffle_repeat = true
 show_volume = true
+
+[new_track]
+# What a new track shows, when the flyout is not shown already:
+#   "compact" - a small panel with the cover art, the title and the artist
+#               (a click on it opens the whole flyout)
+#   "flyout"  - the whole flyout
+#   "nothing" - nothing (the volume, the keys and the tray icon still show
+#               the flyout)
+show = "compact"
+
+# How long the small panel stays, in milliseconds (it fades as the flyout).
+hold_ms = 2500
+
+# true: the small panel goes where the flyout goes, at its size. false: it
+# goes by the settings below, which work as in [display].
+same_place = true
+monitor = "primary"
+anchor = "top-right"
+offset_x = 24
+offset_y = 24
+scale = 1.0

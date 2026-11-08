@@ -11,14 +11,14 @@ use anyhow::Context as _;
 use flexflyout_core::config::{Animation, Monitor, NativeOsd};
 use flexflyout_core::layout::{self, PixelRect};
 use flexflyout_core::{Change, Command, Config};
-use flexflyout_ui::{Labels, panel_size};
+use flexflyout_ui::{Labels, compact_size, panel_size};
 use smithay_client_toolkit::reexports::calloop::EventLoop;
 use smithay_client_toolkit::reexports::calloop::channel::{self, Sender};
 use smithay_client_toolkit::reexports::calloop_wayland_source::WaylandSource;
 use wayland_client::Connection;
 use wayland_client::globals::registry_queue_init;
 
-use crate::flyout::{FlyoutState, Received};
+use crate::flyout::{self, FlyoutState, Mode, Received};
 use crate::i18n::TrayLabels;
 use crate::message::{Message, TrayCommand, Trigger};
 use crate::platform::linux::keys::{self, Key};
@@ -142,7 +142,11 @@ pub fn run(
             crate::demo::spawn(cycles, send);
             None
         }
-        None => Some(start_sources(send, show_on_play_pause)),
+        None => Some(start_sources(
+            send,
+            show_on_play_pause,
+            config.general.player().map(str::to_owned),
+        )),
     };
 
     let mut host = Host {
@@ -180,6 +184,12 @@ impl Host {
                 if mode != old.general.native_osd {
                     native_osd::set_mode(mode);
                 }
+                let player = &self.state.config.general;
+                if player.player != old.general.player
+                    && let Some(controls) = &self.controls
+                {
+                    controls.media.choose(player.player().map(str::to_owned));
+                }
                 // A remembered drag comes back as new settings, which
                 // place the flyout there now.
                 self.wayland.forget_drag();
@@ -199,8 +209,7 @@ impl Host {
         let mut wake = self.state.keep_alive(now, self.wayland.pointer_inside());
         match self.state.timer.next_change(now) {
             Some(after) => {
-                self.wayland
-                    .show(self.placement(now), self.state.config.display.scale);
+                self.wayland.show(self.placement(now), self.state.scale());
                 if let Some(output) = self.draw(now) {
                     let delay = output
                         .viewport_output
@@ -211,15 +220,21 @@ impl Host {
                 // While fading, every frame; else when the fade-out starts.
                 wake = earliest(wake, Some(after.max(FRAME)));
             }
-            None => self.wayland.hide(),
+            None => {
+                self.wayland.hide();
+                flexflyout_ui::reset(&self.ctx);
+            }
         }
         wake
     }
 
     /// Where the flyout goes now (it slides while fading).
     fn placement(&self, now: Instant) -> layer::Placement {
-        let display = &self.state.config.display;
-        let panel = panel_size(&self.state.config.appearance);
+        let display = &flyout::display_for(&self.state.config, self.state.mode);
+        let panel = match self.state.mode {
+            Mode::Full => panel_size(&self.state.config.appearance),
+            Mode::Compact => compact_size(&self.state.config.appearance),
+        };
         let size = (
             (panel.x * display.scale).round() as u32,
             (panel.y * display.scale).round() as u32,
@@ -272,12 +287,16 @@ impl Host {
         let opacity = self.state.timer.opacity(now);
         let mut clicked = None;
         let view = self.state.view(now);
+        let mode = self.state.mode;
         let output = self.wayland.draw(&self.ctx, |ui| {
             if opacity <= 0.0 {
                 return;
             }
             ui.multiply_opacity(opacity);
-            clicked = flexflyout_ui::draw(ui, &view);
+            clicked = match mode {
+                Mode::Full => flexflyout_ui::draw(ui, &view),
+                Mode::Compact => flexflyout_ui::draw_compact(ui, &view),
+            };
         })?;
         if let Some((trigger, sent)) = self.pending.take() {
             log::info!(
@@ -305,6 +324,21 @@ impl Host {
             (Command::OpenSettings, _) => {
                 crate::settings_window::open(&self.config_file, self.lang.as_deref());
             }
+            (Command::ChoosePlayer(choice), _) => {
+                let before = self.state.choose_player(choice);
+                if let Some(controls) = &self.controls {
+                    controls
+                        .media
+                        .choose(self.state.config.general.player().map(str::to_owned));
+                }
+                // Kept for the next start; the reloaded settings change
+                // nothing more.
+                if let Err(err) = self.state.config.save(&self.config_file, &before) {
+                    log::error!("cannot save the player chosen: {err}");
+                }
+            }
+            // The next frame places and draws the whole flyout.
+            (Command::Expand, _) => {}
             (Command::SetVolume(level), Some(controls)) => controls.volume.set_level(level),
             (Command::ToggleMute, Some(controls)) => controls.volume.toggle_mute(),
             (_, Some(controls)) => controls.media.command(command),
@@ -340,6 +374,7 @@ impl Host {
 fn start_sources(
     send: impl Fn(Message) + Clone + Send + 'static,
     show_on_play_pause: Arc<AtomicBool>,
+    player: Option<String>,
 ) -> Controls {
     let to_flyout = send.clone();
     let volume = volume::spawn(move |volume, changed| {
@@ -359,17 +394,23 @@ fn start_sources(
             }));
         });
     }
-    let media = media::spawn(move |now_playing, change| {
-        tray::set_now_playing(now_playing.as_ref());
-        send(Message::NowPlaying(now_playing));
-        match change {
-            Change::NewTrack => send(Message::show(Trigger::TrackChange)),
-            Change::PlayPause if show_on_play_pause.load(Ordering::Relaxed) => {
-                send(Message::show(Trigger::PlayPause));
+    let to_flyout = send.clone();
+    let players = move |players, current| to_flyout(Message::Players { players, current });
+    let media = media::spawn(
+        player,
+        move |now_playing, change| {
+            tray::set_now_playing(now_playing.as_ref());
+            send(Message::NowPlaying(now_playing));
+            match change {
+                Change::NewTrack => send(Message::show(Trigger::TrackChange)),
+                Change::PlayPause if show_on_play_pause.load(Ordering::Relaxed) => {
+                    send(Message::show(Trigger::PlayPause));
+                }
+                Change::PlayPause | Change::Other => {}
             }
-            Change::PlayPause | Change::Other => {}
-        }
-    });
+        },
+        players,
+    );
     Controls { media, volume }
 }
 
@@ -443,7 +484,7 @@ fn watch_settings(
             .then(|| match crate::i18n::load(new_language.as_deref()) {
                 Ok(loader) => {
                     tray::set_labels(crate::i18n::tray_labels(&loader));
-                    Some(crate::i18n::labels(&loader))
+                    Some(Box::new(crate::i18n::labels(&loader)))
                 }
                 Err(err) => {
                     log::error!("{err:#}");

@@ -91,6 +91,9 @@ pub fn labels(loader: &FluentLanguageLoader) -> Labels {
         pin: fl!(loader, "pin"),
         close: fl!(loader, "close"),
         settings: fl!(loader, "settings"),
+        player: fl!(loader, "player"),
+        player_auto: fl!(loader, "player-auto"),
+        expand: fl!(loader, "expand"),
     }
 }
 

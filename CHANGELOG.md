@@ -7,6 +7,16 @@ include breaking changes).
 
 ## [Unreleased]
 
+### Added
+- Choose the player to follow (`general.player`): from the new player
+  button on the flyout, which lists "Auto" and the players there are, or
+  in the settings window. With one chosen, the flyout shows and controls
+  that player only, and only its new tracks show.
+- A new track shows a small panel with its cover art, title and artist
+  (`[new_track]`); a click on it opens the whole flyout. The panel can
+  have a place, a size and a display time of its own, or a new track can
+  show the whole flyout, or nothing.
+
 ### Changed
 - Starting or pausing playback no longer shows the flyout by default
   (`general.show_on_play_pause = false`; a settings file that says `true`

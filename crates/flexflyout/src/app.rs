@@ -14,12 +14,12 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Instant;
 
 use eframe::egui;
-use flexflyout_core::config::{Animation, Display, Monitor, NativeOsd};
+use flexflyout_core::config::{Animation, Display, Monitor, NativeOsd, NewTrack};
 use flexflyout_core::layout::{self, MonitorArea, PixelRect};
 use flexflyout_core::{Change, Command, Config};
-use flexflyout_ui::{Labels, panel_size};
+use flexflyout_ui::{Labels, compact_size, panel_size};
 
-use crate::flyout::{FlyoutState, Received};
+use crate::flyout::{self, FlyoutState, Mode, Received};
 use crate::i18n::TrayLabels;
 use crate::platform::windows::keys::{self, Key};
 use crate::platform::windows::media::{self, Media};
@@ -101,8 +101,14 @@ struct Placement {
     animation: Animation,
     /// Whether the flyout comes up by itself over a full-screen app.
     show_over_fullscreen: bool,
-    /// Size of the panel at scale 1.0 (it depends on the parts shown).
+    /// Size of the panel at scale 1.0 (it depends on the parts shown), and
+    /// of the small panel of a new track.
     size: egui::Vec2,
+    compact_size: egui::Vec2,
+    /// What a new track shows, and where the small panel goes.
+    new_track: NewTrack,
+    /// The panel of the current (or last) appearance.
+    mode: Mode,
     /// Where the window was placed last (where it rests, when sliding).
     rect: Option<PixelRect>,
     /// Where the user moved the shown window to: it stays there until it
@@ -122,6 +128,9 @@ impl SharedPlacement {
             animation: config.timing.animation,
             show_over_fullscreen: config.general.show_over_fullscreen,
             size: panel_size(&config.appearance),
+            compact_size: compact_size(&config.appearance),
+            new_track: config.new_track.clone(),
+            mode: Mode::Full,
             rect: None,
             moved_to: None,
         })))
@@ -132,41 +141,66 @@ impl SharedPlacement {
         self.0.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
-    /// Whether a full-screen app on the monitor the flyout would show on
-    /// keeps it from coming up by itself (the setting says so).
-    fn kept_away_by_fullscreen(&self) -> bool {
+    /// Whether a full-screen app on the monitor the panel `mode` would show
+    /// on keeps it from coming up by itself (the setting says so).
+    fn kept_away_by_fullscreen(&self, mode: Mode) -> bool {
         let placement = self.lock();
         if placement.show_over_fullscreen {
             return false;
         }
         let monitors = monitor::list();
-        layout::choose_monitor(&monitors, placement.display.monitor, monitor::cursor())
-            .is_some_and(|i| monitor::fullscreen_app_on(monitors[i].bounds))
+        layout::choose_monitor(
+            &monitors,
+            placement.display(mode).monitor,
+            monitor::cursor(),
+        )
+        .is_some_and(|i| monitor::fullscreen_app_on(monitors[i].bounds))
     }
 
-    /// Chooses the monitor and the rectangle for the next appearance (the
-    /// monitor under the pointer can change every time), and remembers it.
-    fn next_rect(&self) -> Option<PixelRect> {
+    /// Chooses the monitor and the rectangle for the next appearance of the
+    /// panel `mode` (the monitor under the pointer can change every time),
+    /// and remembers both.
+    fn next_rect(&self, mode: Mode) -> Option<PixelRect> {
         let mut placement = self.lock();
-        if let Some(rect) = placement.moved_to {
+        placement.mode = mode;
+        // A place the user dragged the whole flyout to.
+        if let (Mode::Full, Some(rect)) = (mode, placement.moved_to) {
             placement.rect = Some(rect);
             return Some(rect);
         }
+        let display = placement.display(mode);
+        let base = placement.size(mode);
         let monitors = monitor::list();
-        let rect = layout::choose_monitor(&monitors, placement.display.monitor, monitor::cursor())
-            .map(|i| {
-                let size = (placement.size.x, placement.size.y);
-                let rect = layout::place(&placement.display, &monitors[i], size);
-                match placement.native_osd {
-                    NativeOsd::Avoid => avoid_native_osd(rect, &monitors[i], &monitors),
-                    NativeOsd::Hide | NativeOsd::Keep => rect,
-                }
-            });
+        let rect = layout::choose_monitor(&monitors, display.monitor, monitor::cursor()).map(|i| {
+            let rect = layout::place(&display, &monitors[i], (base.x, base.y));
+            match placement.native_osd {
+                NativeOsd::Avoid => avoid_native_osd(rect, &monitors[i], &monitors),
+                NativeOsd::Hide | NativeOsd::Keep => rect,
+            }
+        });
         if rect.is_none() {
             log::warn!("no monitor to show the flyout on");
         }
         placement.rect = rect;
         rect
+    }
+}
+
+impl Placement {
+    /// The placement settings of the panel `mode`.
+    fn display(&self, mode: Mode) -> Display {
+        match mode {
+            Mode::Full => self.display.clone(),
+            Mode::Compact => self.new_track.display(&self.display),
+        }
+    }
+
+    /// The size of the panel `mode` at scale 1.0.
+    fn size(&self, mode: Mode) -> egui::Vec2 {
+        match mode {
+            Mode::Full => self.size,
+            Mode::Compact => self.compact_size,
+        }
     }
 }
 
@@ -291,7 +325,11 @@ impl FlyoutApp {
                 crate::demo::spawn(cycles, send);
                 None
             }
-            None => Some(start_sources(send, show_on_play_pause)),
+            None => Some(start_sources(
+                send,
+                show_on_play_pause,
+                config.general.player().map(str::to_owned),
+            )),
         };
 
         Ok(Self {
@@ -338,7 +376,8 @@ impl FlyoutApp {
             match placement.animation {
                 Animation::Slide => {
                     let fraction = layout::slide_fraction(self.state.timer.opacity(now));
-                    layout::slide(rect, placement.display.anchor, fraction)
+                    let anchor = placement.display(placement.mode).anchor;
+                    layout::slide(rect, anchor, fraction)
                 }
                 Animation::Fade => rect,
             }
@@ -363,6 +402,7 @@ impl FlyoutApp {
 fn start_sources(
     send: impl Fn(Message) + Clone + Send + Sync + 'static,
     show_on_play_pause: Arc<AtomicBool>,
+    player: Option<String>,
 ) -> Controls {
     let to_window = send.clone();
     let volume = volume::spawn(move |volume, changed| {
@@ -378,17 +418,23 @@ fn start_sources(
             Key::Media => Trigger::MediaKey,
         }));
     });
-    let media = media::spawn(move |now_playing, change| {
-        tray::set_now_playing(now_playing.as_ref());
-        send(Message::NowPlaying(now_playing));
-        match change {
-            Change::NewTrack => send(Message::show(Trigger::TrackChange)),
-            Change::PlayPause if show_on_play_pause.load(Ordering::Relaxed) => {
-                send(Message::show(Trigger::PlayPause));
+    let to_window = send.clone();
+    let players = move |players, current| to_window(Message::Players { players, current });
+    let media = media::spawn(
+        player,
+        move |now_playing, change| {
+            tray::set_now_playing(now_playing.as_ref());
+            send(Message::NowPlaying(now_playing));
+            match change {
+                Change::NewTrack => send(Message::show(Trigger::TrackChange)),
+                Change::PlayPause if show_on_play_pause.load(Ordering::Relaxed) => {
+                    send(Message::show(Trigger::PlayPause));
+                }
+                Change::PlayPause | Change::Other => {}
             }
-            Change::PlayPause | Change::Other => {}
-        }
-    });
+        },
+        players,
+    );
     Controls { media, volume }
 }
 
@@ -413,7 +459,7 @@ fn watch_settings(
             match crate::i18n::load(new_language.as_deref()) {
                 Ok(loader) => {
                     tray::set_labels(crate::i18n::tray_labels(&loader));
-                    Some(crate::i18n::labels(&loader))
+                    Some(Box::new(crate::i18n::labels(&loader)))
                 }
                 Err(err) => {
                     log::error!("{err:#}");
@@ -446,21 +492,35 @@ fn send(
     message: Message,
     show_via_egui: bool,
 ) {
-    let show = match &message {
-        Message::Show { trigger, .. } => {
+    let mut message = message;
+    let show = match &mut message {
+        Message::Show { trigger, mode, .. } => {
+            // The panel for it, decided here (where the window is placed)
+            // and handed on with the message, so that both agree.
+            let visible = window::is_visible(raw);
+            let (shown, new_track) = {
+                let placement = placement.lock();
+                (visible.then_some(placement.mode), placement.new_track.show)
+            };
+            let Some(chosen) = mode.or_else(|| flyout::mode_for(*trigger, new_track, shown)) else {
+                return;
+            };
             // Not over a full-screen game or video, unless the user asked
             // for it, or it shows already (pinned, say).
-            if trigger.is_automatic()
-                && !window::is_visible(raw)
-                && placement.kept_away_by_fullscreen()
-            {
+            if trigger.is_automatic() && !visible && placement.kept_away_by_fullscreen(chosen) {
                 log::info!("{trigger:?}: not shown over the full-screen app");
                 return;
             }
+            *mode = Some(chosen);
+            placement.lock().mode = chosen;
             true
         }
         Message::Settings { config, .. } => {
             let mut placement = placement.lock();
+            let preview = flyout::preview_mode(&placement.new_track, &config.new_track);
+            placement.new_track = config.new_track.clone();
+            placement.compact_size = compact_size(&config.appearance);
+            placement.mode = preview;
             placement.display = config.display.clone();
             placement.native_osd = config.general.native_osd;
             placement.animation = config.timing.animation;
@@ -471,14 +531,17 @@ fn send(
             placement.moved_to = None;
             true
         }
-        Message::NowPlaying(_) | Message::Volume(_) | Message::SystemTheme(_) | Message::Quit => {
-            false
-        }
+        Message::NowPlaying(_)
+        | Message::Volume(_)
+        | Message::SystemTheme(_)
+        | Message::Players { .. }
+        | Message::Quit => false,
     };
     if sender.send(message).is_err() {
         return; // The window is closing.
     }
-    if show && let Some(rect) = placement.next_rect() {
+    let mode = placement.lock().mode;
+    if show && let Some(rect) = placement.next_rect(mode) {
         if window::is_visible(raw) {
             // Shown already: the UI thread puts it where it belongs now
             // (`keep_in_place`), also in the middle of a slide.
@@ -486,7 +549,7 @@ fn send(
             // A sliding flyout starts out of place.
             let (anchor, animation) = {
                 let placement = placement.lock();
-                (placement.display.anchor, placement.animation)
+                (placement.display(mode).anchor, placement.animation)
             };
             let start = match animation {
                 Animation::Slide => layout::slide(rect, anchor, 1.0),
@@ -523,7 +586,13 @@ impl eframe::App for FlyoutApp {
                     if config.general.native_osd != old.general.native_osd {
                         native_osd::set_mode(config.general.native_osd);
                     }
-                    ctx.set_zoom_factor(config.display.scale);
+                    if config.general.player != old.general.player
+                        && let Some(controls) = &self.controls
+                    {
+                        controls
+                            .media
+                            .choose(config.general.player().map(str::to_owned));
+                    }
                     self.cleared = false;
                     if self.show_via_egui {
                         ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
@@ -536,6 +605,12 @@ impl eframe::App for FlyoutApp {
             }
         }
 
+        // The panel is drawn in points at scale 1.0, and each panel has its
+        // own size setting.
+        let scale = self.state.scale();
+        if ctx.zoom_factor() != scale {
+            ctx.set_zoom_factor(scale);
+        }
         if window::take_move_ended() {
             self.finish_move();
         }
@@ -558,6 +633,7 @@ impl eframe::App for FlyoutApp {
                     } else {
                         self.window.hide();
                     }
+                    flexflyout_ui::reset(ctx);
                 } else {
                     ctx.request_repaint();
                 }
@@ -589,7 +665,11 @@ impl eframe::App for FlyoutApp {
         }
         ui.multiply_opacity(opacity);
         let view = self.state.view(now);
-        if let Some(command) = flexflyout_ui::draw(ui, &view) {
+        let command = match self.state.mode {
+            Mode::Full => flexflyout_ui::draw(ui, &view),
+            Mode::Compact => flexflyout_ui::draw_compact(ui, &view),
+        };
+        if let Some(command) = command {
             self.carry_out(command, now, ui.ctx());
         }
     }
@@ -646,6 +726,24 @@ impl FlyoutApp {
             (Command::StartMove, _) => self.window.start_move(),
             (Command::OpenSettings, _) => {
                 crate::settings_window::open(&self.config_file, self.lang.as_deref());
+            }
+            (Command::ChoosePlayer(choice), _) => {
+                let before = self.state.choose_player(choice);
+                let chosen = self.state.config.general.player().map(str::to_owned);
+                if let Some(controls) = &self.controls {
+                    controls.media.choose(chosen);
+                }
+                // Kept for the next start; the reloaded settings change
+                // nothing more.
+                if let Err(err) = self.state.config.save(&self.config_file, &before) {
+                    log::error!("cannot save the player chosen: {err}");
+                }
+            }
+            // The whole flyout, where it goes, in place of the small panel.
+            (Command::Expand, _) => {
+                if let Some(rect) = self.placement.next_rect(Mode::Full) {
+                    self.window.set_rect(rect);
+                }
             }
             (Command::SetVolume(level), Some(controls)) => controls.volume.set_level(level),
             (Command::ToggleMute, Some(controls)) => controls.volume.toggle_mute(),

@@ -3,7 +3,7 @@
 
 use std::time::Instant;
 
-use flexflyout_core::{Config, NowPlaying, Theme, Volume};
+use flexflyout_core::{Config, NowPlaying, Player, Theme, Volume};
 use flexflyout_ui::Labels;
 
 /// What the sources send to the window.
@@ -16,12 +16,20 @@ pub enum Message {
     /// The system's colors changed (dark or light), or were read for the
     /// first time.
     SystemTheme(Theme),
+    /// The players there are, and the one whose track is shown (its ID).
+    Players {
+        players: Vec<Player>,
+        current: Option<String>,
+    },
     /// Show the flyout with what it has.
     Show {
         /// Why.
         trigger: Trigger,
         /// When the message was sent, to log how long showing took.
         sent: Instant,
+        /// The panel to show, when the host decided already (`None`: by
+        /// the trigger, see [`crate::flyout::mode_for`]).
+        mode: Option<crate::flyout::Mode>,
     },
     /// Use new settings (the file was saved). The flyout is shown with
     /// them, so that a change of the placement or the look can be seen.
@@ -29,7 +37,7 @@ pub enum Message {
         /// The settings read from the file.
         config: Box<Config>,
         /// The texts again, when the language changed.
-        labels: Option<Labels>,
+        labels: Option<Box<Labels>>,
     },
     /// Close the app (Quit in the tray menu, or the end of the demo).
     Quit,
@@ -78,6 +86,7 @@ impl Message {
         Self::Show {
             trigger,
             sent: Instant::now(),
+            mode: None,
         }
     }
 }

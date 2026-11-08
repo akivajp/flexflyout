@@ -83,10 +83,13 @@ pub fn spawn(cycles: u32, send: impl Fn(Message) + Send + 'static) {
                     muted: i % 4 == 3,
                 }));
                 log::info!("demo: appearance {} of {cycles}", i + 1);
-                send(Message::Show {
-                    trigger: Trigger::Demo,
-                    sent: Instant::now(),
-                });
+                // Every second one as a new track, which shows what the
+                // settings say for one (the small panel by default).
+                send(Message::show(if i % 2 == 1 {
+                    Trigger::TrackChange
+                } else {
+                    Trigger::Demo
+                }));
                 i += 1;
                 std::thread::sleep(INTERVAL);
             }

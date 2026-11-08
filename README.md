@@ -8,7 +8,7 @@
 
 > **Early development.** Windows 11 and KDE Plasma (Wayland) work; GNOME follows.
 
-A flexible, cross-platform media flyout. When you change the volume or a new track starts, it pops up with what is playing — cover art, title and artist — along with the position in the track, playback controls (including shuffle and repeat) and the volume, then fades away. Click or drag the bars to seek or set the volume, or turn the mouse wheel over the volume bar. Pin the flyout to keep it on screen — and drag it wherever you like, optionally as its new usual place — or close it at once.
+A flexible, cross-platform media flyout. When you change the volume or press a media key, it pops up with what is playing — cover art, title and artist — along with the position in the track, playback controls (including shuffle and repeat) and the volume, then fades away. A new track shows a small panel with just its cover art, title and artist; click it for the whole flyout. Click or drag the bars to seek or set the volume, or turn the mouse wheel over the volume bar. Pin the flyout to keep it on screen — and drag it wherever you like, optionally as its new usual place — or close it at once.
 
 <p align="center"><img src="docs/images/flyout-en.png" alt="The flyout: cover art, the title and artist, the position in the track, shuffle, previous, pause, next and repeat buttons, and the volume at 64%" width="448"></p>
 
@@ -21,6 +21,8 @@ Screen sizes and monitor setups differ from desk to desk, so every part of the f
 - **Look** — dark or light colors (or the system's, following its light or dark mode), the accent color, the roundness of the corners, and which parts to show (cover art, position bar, shuffle and repeat, volume) for a smaller flyout
 - **The system's own volume indicator** (Windows, KDE Plasma) — keep it and place the flyout clear of it, or hide it
 - **Full-screen apps** — show the flyout over a full-screen game or video, or keep it off the monitor that has one
+- **Player** — follow whichever player plays, or only the one you choose (Spotify, say), from the flyout's player button or the settings
+- **New tracks** — a small panel (with its own place, size and display time, or the flyout's), the whole flyout, or nothing
 
 <p align="center"><img src="docs/images/settings-en.png" alt="The settings window, with the flyout showing in the top right corner as a preview of the changes" width="640"></p>
 

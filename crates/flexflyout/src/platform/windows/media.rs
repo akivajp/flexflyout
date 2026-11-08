@@ -6,13 +6,21 @@
 //! cover art) and the button commands in order. Players often send several
 //! events for one change (the title, then the cover art), so requests that
 //! arrive close together are handled once.
+//!
+//! The player followed is the one Windows names as current, or the one the
+//! settings choose (`general.player`, the app's ID): then only that one.
+//! The list of players is reported for the flyout's player button.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender, channel};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use anyhow::Context as _;
-use flexflyout_core::{Change, Command, Cover, NowPlaying, PlaybackStatus, RepeatMode, Timeline};
+use flexflyout_core::{
+    Change, Command, Cover, NowPlaying, PlaybackStatus, Player, RepeatMode, Timeline,
+};
+use windows::ApplicationModel::AppInfo;
 use windows::Foundation::{DateTime, TypedEventHandler};
 use windows::Graphics::Imaging::{
     BitmapAlphaMode, BitmapDecoder, BitmapInterpolationMode, BitmapPixelFormat, BitmapTransform,
@@ -51,11 +59,18 @@ const SECONDS_1601_TO_1970: i64 = 11_644_473_600;
 /// what changed.
 type Sink = Box<dyn Fn(Option<NowPlaying>, Change) + Send>;
 
+/// Receives the players there are and the ID of the one followed.
+type PlayersSink = Box<dyn Fn(Vec<Player>, Option<String>) + Send>;
+
 /// What the media thread is asked to do.
 #[derive(Debug)]
 enum Request {
     /// Another player became the current one (or the last one closed).
     SessionChanged,
+    /// A player came or went.
+    SessionsChanged,
+    /// Follow this player (its ID), or Windows' current one (`None`).
+    Choose(Option<String>),
     /// The track's title, artist or cover art changed.
     PropertiesChanged,
     /// The player started, paused or stopped, or changed its repeat or
@@ -79,19 +94,29 @@ impl Media {
     pub fn command(&self, command: Command) {
         let _ = self.requests.send(Request::Command(command));
     }
+
+    /// Follows the player `choice` (its ID), or Windows' current one.
+    pub fn choose(&self, choice: Option<String>) {
+        let _ = self.requests.send(Request::Choose(choice));
+    }
 }
 
-/// Starts following the current player.
-pub fn spawn(sink: impl Fn(Option<NowPlaying>, Change) + Send + 'static) -> Media {
+/// Starts following the player `choice` (its ID), or Windows' current one.
+pub fn spawn(
+    choice: Option<String>,
+    sink: impl Fn(Option<NowPlaying>, Change) + Send + 'static,
+    players: impl Fn(Vec<Player>, Option<String>) + Send + 'static,
+) -> Media {
     let (requests, received) = channel();
     let media = Media {
         requests: requests.clone(),
     };
     let sink: Sink = Box::new(sink);
+    let players: PlayersSink = Box::new(players);
     let spawned = std::thread::Builder::new()
         .name("media".into())
         .spawn(move || {
-            if let Err(err) = run(&sink, &requests, &received) {
+            if let Err(err) = run(choice, &sink, &players, &requests, &received) {
                 log::error!("the media player cannot be followed: {err:#}");
             }
         });
@@ -122,9 +147,11 @@ impl Drop for Current {
     }
 }
 
-/// Follows the current player until the app ends.
+/// Follows the player until the app ends.
 fn run(
+    mut choice: Option<String>,
     sink: &Sink,
+    players_sink: &PlayersSink,
     requests: &Sender<Request>,
     received: &Receiver<Request>,
 ) -> anyhow::Result<()> {
@@ -140,8 +167,16 @@ fn run(
         let _ = sender.send(Request::SessionChanged);
         Ok(())
     }))?;
+    let sender = requests.clone();
+    manager.SessionsChanged(&TypedEventHandler::new(move |_, _| {
+        let _ = sender.send(Request::SessionsChanged);
+        Ok(())
+    }))?;
 
-    let mut current = subscribe(&manager, requests);
+    let mut names = HashMap::new();
+    let mut current = subscribe(&manager, choice.as_deref(), requests);
+    let mut listed = (players(&manager, &mut names), current_id(current.as_ref()));
+    players_sink(listed.0.clone(), listed.1.clone());
     let mut track = read_track(current.as_ref(), None).unwrap_or_else(|err| {
         log::warn!("cannot read the track: {err}");
         retry_later(requests);
@@ -161,7 +196,12 @@ fn run(
         let mut next = Some(first);
         while let Some(request) = next.take() {
             match request {
-                Request::SessionChanged => session = true,
+                Request::SessionChanged | Request::SessionsChanged => session = true,
+                Request::Choose(chosen) => {
+                    log::info!("player chosen: {chosen:?}");
+                    choice = chosen;
+                    session = true;
+                }
                 Request::PropertiesChanged => properties = true,
                 Request::PlaybackChanged | Request::TimelineChanged => playback = true,
                 Request::Command(command) => {
@@ -180,7 +220,12 @@ fn run(
         }
 
         if session {
-            current = subscribe(&manager, requests);
+            current = subscribe(&manager, choice.as_deref(), requests);
+            let now = (players(&manager, &mut names), current_id(current.as_ref()));
+            if now != listed {
+                players_sink(now.0.clone(), now.1.clone());
+                listed = now;
+            }
         }
         let new = if session || properties {
             read_track(current.as_ref(), None)
@@ -240,9 +285,131 @@ fn same_but_timeline(old: Option<&NowPlaying>, new: Option<&NowPlaying>) -> bool
     }
 }
 
-/// Subscribes to the events of the current player, if there is one.
-fn subscribe(manager: &SessionManager, requests: &Sender<Request>) -> Option<Current> {
-    let session = manager.GetCurrentSession().ok()?;
+/// The players there are (one per app), with their names (looked up once
+/// each, in `names`).
+fn players(manager: &SessionManager, names: &mut HashMap<String, String>) -> Vec<Player> {
+    let Ok(sessions) = manager.GetSessions() else {
+        return Vec::new();
+    };
+    let mut players: Vec<Player> = Vec::new();
+    for session in sessions {
+        let Ok(id) = session
+            .SourceAppUserModelId()
+            .map(|id| id.to_string_lossy())
+        else {
+            continue;
+        };
+        if id.is_empty() || players.iter().any(|player| player.id == id) {
+            continue;
+        }
+        let name = names
+            .entry(id.clone())
+            .or_insert_with(|| display_name(&id))
+            .clone();
+        players.push(Player { id, name });
+    }
+    // In a steady order, whatever order Windows lists them in.
+    players.sort_by_key(|player| player.name.to_lowercase());
+    players
+}
+
+/// The players there are now, for a process that does not follow them
+/// (the settings window). On a thread of its own, with COM of its own (the
+/// window's thread sets COM up differently later).
+pub fn list() -> Vec<Player> {
+    let listed = std::thread::Builder::new()
+        .name("players".into())
+        .spawn(|| {
+            // SAFETY: initializes COM for this short-lived thread.
+            let _ = unsafe { CoInitializeEx(None, COINIT_MULTITHREADED) };
+            match SessionManager::RequestAsync().and_then(|operation| operation.join()) {
+                Ok(manager) => players(&manager, &mut HashMap::new()),
+                Err(err) => {
+                    log::warn!("cannot list the players: {err}");
+                    Vec::new()
+                }
+            }
+        });
+    listed
+        .ok()
+        .and_then(|thread| thread.join().ok())
+        .unwrap_or_default()
+}
+
+/// The ID of the player followed.
+fn current_id(current: Option<&Current>) -> Option<String> {
+    current
+        .and_then(|current| current.session.SourceAppUserModelId().ok())
+        .map(|id| id.to_string_lossy())
+}
+
+/// The name Windows shows for the app `id`: its entry in the Start menu's
+/// list of apps (which knows desktop apps such as Edge, "MSEdge", by the
+/// same ID), else the app information of a Store app, else one made from
+/// the ID.
+fn display_name(id: &str) -> String {
+    start_menu_name(id)
+        .or_else(|| {
+            AppInfo::GetFromAppUserModelId(&windows::core::HSTRING::from(id))
+                .and_then(|info| info.DisplayInfo())
+                .and_then(|display| display.DisplayName())
+                .map(|name| name.to_string_lossy())
+                .ok()
+        })
+        .filter(|name| !name.trim().is_empty())
+        .unwrap_or_else(|| name_from_id(id))
+}
+
+/// The name of the app `id` in the Start menu's list of apps
+/// (`shell:AppsFolder`). Needs COM on the calling thread.
+fn start_menu_name(id: &str) -> Option<String> {
+    use windows::Win32::System::Com::CoTaskMemFree;
+    use windows::Win32::UI::Shell::{IShellItem, SHCreateItemFromParsingName, SIGDN_NORMALDISPLAY};
+    let path = windows::core::HSTRING::from(format!(r"shell:AppsFolder\{id}"));
+    // SAFETY: a shell item of a path that lives through the call; the name
+    // it gives is copied, then freed as the shell asks.
+    unsafe {
+        let item: IShellItem = SHCreateItemFromParsingName(&path, None).ok()?;
+        let name = item.GetDisplayName(SIGDN_NORMALDISPLAY).ok()?;
+        let text = name.to_string().ok();
+        CoTaskMemFree(Some(name.0 as *const _));
+        text
+    }
+}
+
+/// A name made from an app's ID: the part after "!" of a Store app's,
+/// without ".exe" ("Spotify.exe" → "Spotify").
+fn name_from_id(id: &str) -> String {
+    let name = id.rsplit('!').next().unwrap_or(id);
+    let name = match name.len().checked_sub(4) {
+        Some(stem) if name.is_char_boundary(stem) && name[stem..].eq_ignore_ascii_case(".exe") => {
+            &name[..stem]
+        }
+        _ => name,
+    };
+    name.to_owned()
+}
+
+/// The session of the player `choice` (its ID, case aside), or Windows'
+/// current one.
+fn session_for(manager: &SessionManager, choice: Option<&str>) -> Option<Session> {
+    let Some(choice) = choice else {
+        return manager.GetCurrentSession().ok();
+    };
+    manager.GetSessions().ok()?.into_iter().find(|session| {
+        session
+            .SourceAppUserModelId()
+            .is_ok_and(|id| id.to_string_lossy().eq_ignore_ascii_case(choice))
+    })
+}
+
+/// Subscribes to the events of the player followed, if it is there.
+fn subscribe(
+    manager: &SessionManager,
+    choice: Option<&str>,
+    requests: &Sender<Request>,
+) -> Option<Current> {
+    let session = session_for(manager, choice)?;
     let app = session.SourceAppUserModelId().unwrap_or_default();
     log::info!("current player: {app}");
     let sender = requests.clone();
@@ -490,7 +657,9 @@ fn send_command(current: Option<&Current>, command: Command) {
         | Command::Pin(_)
         | Command::Close
         | Command::StartMove
-        | Command::OpenSettings => {
+        | Command::OpenSettings
+        | Command::ChoosePlayer(_)
+        | Command::Expand => {
             log::warn!("{command:?} is not for the player");
             return;
         }
@@ -499,5 +668,22 @@ fn send_command(current: Option<&Current>, command: Command) {
         Ok(true) => log::info!("sent {command:?} to the player"),
         Ok(false) => log::info!("the player refused {command:?}"),
         Err(err) => log::warn!("cannot send {command:?}: {err}"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn names_are_made_from_app_ids() {
+        assert_eq!(name_from_id("Spotify.exe"), "Spotify");
+        assert_eq!(name_from_id("Chrome"), "Chrome");
+        assert_eq!(
+            name_from_id("Microsoft.ZuneMusic_8wekyb3d8bbwe!Microsoft.ZuneMusic"),
+            "Microsoft.ZuneMusic"
+        );
+        assert_eq!(name_from_id("PLAYER.EXE"), "PLAYER");
+        assert_eq!(name_from_id(".exe"), "");
     }
 }

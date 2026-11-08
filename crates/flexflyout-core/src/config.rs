@@ -41,6 +41,88 @@ pub struct Config {
     pub timing: TimingConfig,
     /// The panel's colors, shape and parts.
     pub appearance: Appearance,
+    /// What a new track shows.
+    pub new_track: NewTrack,
+}
+
+/// What a new track shows: a small panel with its cover art, title and
+/// artist, the whole flyout, or nothing. The small panel can have a place
+/// and a size of its own.
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+#[serde(default)]
+pub struct NewTrack {
+    /// What shows.
+    pub show: NewTrackShow,
+    /// How long the small panel stays, in milliseconds (it fades like the
+    /// flyout).
+    pub hold_ms: u64,
+    /// Whether the small panel goes where the flyout goes, at its size
+    /// (the `[display]` settings), rather than by the settings below.
+    pub same_place: bool,
+    /// The small panel's own monitor, anchor, offsets and size, as in
+    /// `[display]`.
+    pub monitor: Monitor,
+    pub anchor: Anchor,
+    pub offset_x: i32,
+    pub offset_y: i32,
+    pub scale: f32,
+}
+
+impl Default for NewTrack {
+    fn default() -> Self {
+        let display = Display::default();
+        Self {
+            show: NewTrackShow::default(),
+            hold_ms: 2500,
+            same_place: true,
+            monitor: display.monitor,
+            anchor: display.anchor,
+            offset_x: display.offset_x,
+            offset_y: display.offset_y,
+            scale: display.scale,
+        }
+    }
+}
+
+impl NewTrack {
+    /// Where the small panel goes: the flyout's placement (`flyout`), or
+    /// that with this section's own monitor, anchor, offsets and size.
+    pub fn display(&self, flyout: &Display) -> Display {
+        if self.same_place {
+            return flyout.clone();
+        }
+        Display {
+            monitor: self.monitor,
+            anchor: self.anchor,
+            offset_x: self.offset_x,
+            offset_y: self.offset_y,
+            scale: self.scale,
+            ..flyout.clone()
+        }
+    }
+
+    /// The durations of the small panel's appearance: the flyout's fades,
+    /// with its own hold.
+    pub fn timing(&self, flyout: &TimingConfig) -> Timing {
+        Timing {
+            hold: Duration::from_millis(self.hold_ms),
+            ..flyout.timing()
+        }
+    }
+}
+
+/// What a new track shows.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum NewTrackShow {
+    /// A small panel with the cover art, the title and the artist.
+    #[default]
+    Compact,
+    /// The whole flyout.
+    Flyout,
+    /// Nothing (the volume, the keys and the tray icon still show the
+    /// flyout).
+    Nothing,
 }
 
 /// Largest corner radius, in points (the panel is 164 points tall at most).
@@ -141,6 +223,10 @@ pub struct General {
     /// Whether the flyout also shows when the player starts or pauses
     /// (besides a new track, a volume change and the keys).
     pub show_on_play_pause: bool,
+    /// The player to follow: `"auto"` (the one the system names, or the
+    /// one that last started playing) or a player's ID, such as
+    /// `"Spotify.exe"` on Windows or `"spotify"` on Linux.
+    pub player: String,
     /// Whether to ask GitHub once a day for a newer release (and say so in
     /// the tray menu and with a notification).
     pub check_updates: bool,
@@ -156,6 +242,7 @@ impl Default for General {
             language: "auto".to_owned(),
             native_osd: NativeOsd::default(),
             show_on_play_pause: false,
+            player: "auto".to_owned(),
             check_updates: true,
             show_over_fullscreen: true,
         }
@@ -167,6 +254,12 @@ impl General {
     pub fn language(&self) -> Option<&str> {
         let lang = self.language.trim();
         (!lang.is_empty() && !lang.eq_ignore_ascii_case("auto")).then_some(lang)
+    }
+
+    /// The ID of the player to follow, or `None` for whichever plays.
+    pub fn player(&self) -> Option<&str> {
+        let player = self.player.trim();
+        (!player.is_empty() && !player.eq_ignore_ascii_case("auto")).then_some(player)
     }
 }
 
@@ -483,6 +576,13 @@ impl Config {
             ));
             appearance.corner_radius = MAX_CORNER_RADIUS;
         }
+        clamp_f32(
+            "new_track.scale",
+            &mut self.new_track.scale,
+            SCALE_RANGE,
+            NewTrack::default().scale,
+            warnings,
+        );
         let display = &mut self.display;
         clamp_f32(
             "display.scale",
@@ -791,6 +891,46 @@ mod tests {
         assert_eq!(loaded.config.appearance.corner_radius, MAX_CORNER_RADIUS);
         assert_eq!(loaded.config.appearance.theme, Theme::Light);
         assert_eq!(loaded.warnings.len(), 2, "{:?}", loaded.warnings);
+    }
+
+    #[test]
+    fn the_new_track_panel_goes_where_its_settings_say() {
+        let flyout = Display {
+            anchor: Anchor::BottomRight,
+            scale: 1.5,
+            opacity: 0.5,
+            ..Display::default()
+        };
+        let mut new_track = NewTrack::default();
+        assert_eq!(new_track.display(&flyout), flyout);
+        new_track.same_place = false;
+        new_track.anchor = Anchor::Top;
+        new_track.scale = 0.75;
+        let own = new_track.display(&flyout);
+        assert_eq!((own.anchor, own.scale), (Anchor::Top, 0.75));
+        // The look stays the flyout's.
+        assert_eq!(own.opacity, 0.5);
+        let timing = new_track.timing(&TimingConfig::default());
+        assert_eq!(timing.hold, Duration::from_millis(2500));
+        assert_eq!(timing.fade_in, TimingConfig::default().timing().fade_in);
+        let loaded = Config::parse("[new_track]\nshow = \"nothing\"\nscale = 9.0\n").unwrap();
+        assert_eq!(loaded.config.new_track.show, NewTrackShow::Nothing);
+        assert_eq!(loaded.config.new_track.scale, SCALE_RANGE.1);
+    }
+
+    #[test]
+    fn the_player_auto_means_any() {
+        let player = |player: &str| {
+            General {
+                player: player.to_owned(),
+                ..General::default()
+            }
+            .player()
+            .map(str::to_owned)
+        };
+        assert_eq!(player("auto"), None);
+        assert_eq!(player(""), None);
+        assert_eq!(player("Spotify.exe"), Some("Spotify.exe".to_owned()));
     }
 
     #[test]

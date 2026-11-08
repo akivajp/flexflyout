@@ -6,7 +6,10 @@
 //! order; requests that arrive close together are handled once.
 //!
 //! The current player is the one that last started playing; while none
-//! plays, the one shown before stays, else any.
+//! plays, the one shown before stays, else any. When the settings choose
+//! one (`general.player`, its MPRIS name without the instance, such as
+//! "spotify"), only that one is followed. The list of players is reported
+//! for the flyout's player button.
 //!
 //! Cover art given as a web address (Spotify) is downloaded on a thread of
 //! its own, and joins the track when it arrives: a slow or unreachable
@@ -18,7 +21,9 @@ use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender, channel};
 use std::time::{Duration, Instant};
 
 use anyhow::Context as _;
-use flexflyout_core::{Change, Command, Cover, NowPlaying, PlaybackStatus, RepeatMode, Timeline};
+use flexflyout_core::{
+    Change, Command, Cover, NowPlaying, PlaybackStatus, Player, RepeatMode, Timeline,
+};
 use zbus::MatchRule;
 use zbus::blocking::{Connection, MessageIterator, Proxy};
 use zbus::message::Type;
@@ -43,6 +48,9 @@ const PLAYER: &str = "org.mpris.MediaPlayer2.Player";
 /// what changed.
 type Sink = Box<dyn Fn(Option<NowPlaying>, Change) + Send>;
 
+/// Receives the players there are and the ID of the one followed.
+type PlayersSink = Box<dyn Fn(Vec<Player>, Option<String>) + Send>;
+
 /// What the media thread is asked to do.
 #[derive(Debug)]
 enum Request {
@@ -52,6 +60,8 @@ enum Request {
     Players,
     /// A control of the flyout was used.
     Command(Command),
+    /// Follow this player (its ID), or whichever plays (`None`).
+    Choose(Option<String>),
     /// The cover art at this web address was downloaded (`None`: it could
     /// not be).
     Cover(String, Option<Arc<Cover>>),
@@ -68,19 +78,29 @@ impl Media {
     pub fn command(&self, command: Command) {
         let _ = self.requests.send(Request::Command(command));
     }
+
+    /// Follows the player `choice` (its ID), or whichever plays.
+    pub fn choose(&self, choice: Option<String>) {
+        let _ = self.requests.send(Request::Choose(choice));
+    }
 }
 
-/// Starts following the players.
-pub fn spawn(sink: impl Fn(Option<NowPlaying>, Change) + Send + 'static) -> Media {
+/// Starts following the player `choice` (its ID), or whichever plays.
+pub fn spawn(
+    choice: Option<String>,
+    sink: impl Fn(Option<NowPlaying>, Change) + Send + 'static,
+    players: impl Fn(Vec<Player>, Option<String>) + Send + 'static,
+) -> Media {
     let (requests, received) = channel();
     let media = Media {
         requests: requests.clone(),
     };
     let sink: Sink = Box::new(sink);
+    let players: PlayersSink = Box::new(players);
     let spawned = std::thread::Builder::new()
         .name("media".into())
         .spawn(move || {
-            if let Err(err) = run(&sink, &requests, &received) {
+            if let Err(err) = run(choice, &sink, &players, &requests, &received) {
                 log::error!("the media players cannot be followed: {err:#}");
             }
         });
@@ -99,7 +119,9 @@ struct Current {
 
 /// Follows the players until the app ends.
 fn run(
+    mut choice: Option<String>,
     sink: &Sink,
+    players_sink: &PlayersSink,
     requests: &Sender<Request>,
     received: &Receiver<Request>,
 ) -> anyhow::Result<()> {
@@ -140,10 +162,15 @@ fn run(
 
     let mut covers = CoverCache::new(requests.clone());
     let mut active: Option<String> = None;
-    let mut current = choose(&connection, None, None);
+    let mut current = pick(&connection, None, None, choice.as_deref());
     let mut track = current.as_ref().and_then(|c| read_track(c, &mut covers));
     log::info!("now playing: {track:?}");
     sink(track.clone(), Change::Other);
+    let mut listed = (
+        players(&connection),
+        current.as_ref().map(|c| player_id(&c.name).to_owned()),
+    );
+    players_sink(listed.0.clone(), listed.1.clone());
 
     loop {
         let Ok(first) = received.recv() else {
@@ -161,6 +188,11 @@ fn run(
                     changed = true;
                 }
                 Request::Players => changed = true,
+                Request::Choose(chosen) => {
+                    log::info!("player chosen: {chosen:?}");
+                    choice = chosen;
+                    changed = true;
+                }
                 Request::Cover(url, cover) => {
                     // Read the track again, now with its cover art.
                     if covers.finish(url, cover) {
@@ -184,10 +216,11 @@ fn run(
         if !changed {
             continue;
         }
-        let chosen = choose(
+        let chosen = pick(
             &connection,
             active.as_deref(),
             current.as_ref().map(|c| c.name.as_str()),
+            choice.as_deref(),
         );
         if chosen.as_ref().map(|c| &c.name) != current.as_ref().map(|c| &c.name) {
             log::info!(
@@ -196,6 +229,14 @@ fn run(
             );
         }
         current = chosen;
+        let now = (
+            players(&connection),
+            current.as_ref().map(|c| player_id(&c.name).to_owned()),
+        );
+        if now != listed {
+            players_sink(now.0.clone(), now.1.clone());
+            listed = now;
+        }
         let new = current.as_ref().and_then(|c| read_track(c, &mut covers));
         if new == track {
             continue;
@@ -271,19 +312,20 @@ fn playing(connection: &Connection, name: &str) -> bool {
         .is_some_and(|status| status == "Playing")
 }
 
-/// Picks the player to show: the one that last started playing (`active`,
-/// a unique name) if it still plays, else any that plays, else the one
-/// shown before (`previous`), else any.
-fn choose(
-    connection: &Connection,
-    active: Option<&str>,
-    previous: Option<&str>,
-) -> Option<Current> {
+/// A player's ID from its bus name: the part after the prefix, without an
+/// instance ("org.mpris.MediaPlayer2.chromium.instance123" → "chromium"),
+/// which stays the same from run to run.
+fn player_id(name: &str) -> &str {
+    let name = name.strip_prefix(PREFIX).unwrap_or(name);
+    name.split('.').next().unwrap_or(name)
+}
+
+/// The players' bus names.
+fn player_names(connection: &Connection) -> Vec<String> {
     let Ok(bus) = zbus::blocking::fdo::DBusProxy::new(connection) else {
-        return None;
+        return Vec::new();
     };
-    let names: Vec<String> = bus
-        .list_names()
+    bus.list_names()
         .map(|names| {
             names
                 .into_iter()
@@ -291,7 +333,63 @@ fn choose(
                 .filter(|name| name.starts_with(PREFIX))
                 .collect()
         })
-        .unwrap_or_default();
+        .unwrap_or_default()
+}
+
+/// The players there are (one per ID), with the names they give
+/// themselves (their `Identity`).
+fn players(connection: &Connection) -> Vec<Player> {
+    let mut players: Vec<Player> = Vec::new();
+    for name in player_names(connection) {
+        let id = player_id(&name).to_owned();
+        if players.iter().any(|player| player.id == id) {
+            continue;
+        }
+        let identity = zbus::blocking::proxy::Builder::<Proxy<'_>>::new(connection)
+            .destination(name.clone())
+            .and_then(|builder| builder.path(PATH))
+            .and_then(|builder| builder.interface("org.mpris.MediaPlayer2"))
+            .and_then(|builder| builder.cache_properties(CacheProperties::No).build())
+            .and_then(|proxy| proxy.get_property::<String>("Identity"))
+            .ok()
+            .filter(|identity| !identity.trim().is_empty());
+        let name = identity.unwrap_or_else(|| id.clone());
+        players.push(Player { id, name });
+    }
+    // In a steady order: the bus lists names in no particular one.
+    players.sort_by_key(|player| player.name.to_lowercase());
+    players
+}
+
+/// The players there are now, for a process that does not follow them
+/// (the settings window).
+pub fn list() -> Vec<Player> {
+    match Connection::session() {
+        Ok(connection) => players(&connection),
+        Err(err) => {
+            log::warn!("cannot list the players: {err}");
+            Vec::new()
+        }
+    }
+}
+
+/// Picks the player to show: among those of the ID `choice` if it is set,
+/// the one that last started playing (`active`, a unique name) if it
+/// still plays, else any that plays, else the one shown before
+/// (`previous`), else any.
+fn pick(
+    connection: &Connection,
+    active: Option<&str>,
+    previous: Option<&str>,
+    choice: Option<&str>,
+) -> Option<Current> {
+    let Ok(bus) = zbus::blocking::fdo::DBusProxy::new(connection) else {
+        return None;
+    };
+    let names: Vec<String> = player_names(connection)
+        .into_iter()
+        .filter(|name| choice.is_none_or(|choice| player_id(name) == choice))
+        .collect();
     let owner = |name: &str| -> Option<String> {
         let name = zbus::names::BusName::try_from(name).ok()?;
         bus.get_name_owner(name).ok().map(|owner| owner.to_string())
@@ -441,7 +539,9 @@ fn send_command(current: &Current, command: Command, track: Option<&NowPlaying>)
         | Command::Pin(_)
         | Command::Close
         | Command::StartMove
-        | Command::OpenSettings => {
+        | Command::OpenSettings
+        | Command::ChoosePlayer(_)
+        | Command::Expand => {
             log::warn!("{command:?} is not for the player");
             return;
         }
@@ -706,6 +806,20 @@ mod tests {
         // The art of a track that has passed meanwhile is not taken.
         assert!(!covers.finish("http://127.0.0.1:9/passed.png".into(), None));
         assert!(covers.get(&address).is_some());
+    }
+
+    #[test]
+    fn player_ids_leave_out_the_instance() {
+        assert_eq!(player_id("org.mpris.MediaPlayer2.spotify"), "spotify");
+        assert_eq!(
+            player_id("org.mpris.MediaPlayer2.chromium.instance12345"),
+            "chromium"
+        );
+        assert_eq!(
+            player_id("org.mpris.MediaPlayer2.firefox.instance_1_88"),
+            "firefox"
+        );
+        assert_eq!(player_id("org.mpris.MediaPlayer2.mpv"), "mpv");
     }
 
     #[test]

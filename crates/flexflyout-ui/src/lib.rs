@@ -16,7 +16,7 @@ use egui::{
     Shape, Stroke, StrokeKind, TextureHandle, TextureOptions, Ui, WidgetInfo, pos2, vec2,
 };
 use flexflyout_core::{
-    Appearance, Command, Cover, NowPlaying, PlaybackStatus, RepeatMode, Theme, Volume,
+    Appearance, Command, Cover, NowPlaying, PlaybackStatus, Player, RepeatMode, Theme, Volume,
 };
 
 /// Size of the panel at scale 1.0, in egui points, with the parts the
@@ -33,6 +33,95 @@ pub fn panel_size(appearance: &Appearance) -> egui::Vec2 {
         2.0 * MARGIN + cover + column_width(appearance),
         2.0 * MARGIN + height,
     )
+}
+
+/// Size of the small panel of a new track at scale 1.0, in egui points:
+/// narrower without the cover art.
+pub fn compact_size(appearance: &Appearance) -> egui::Vec2 {
+    let cover = if appearance.show_cover_art {
+        COMPACT_COVER + COMPACT_GAP
+    } else {
+        0.0
+    };
+    vec2(
+        2.0 * COMPACT_MARGIN + cover + COMPACT_TEXT_WIDTH,
+        2.0 * COMPACT_MARGIN + COMPACT_COVER,
+    )
+}
+
+/// Draws the small panel of a new track over the whole of `ui`'s area: the
+/// cover art, the title and the artist. A click on it asks for the whole
+/// flyout ([`Command::Expand`]).
+pub fn draw_compact(ui: &mut Ui, view: &FlyoutView<'_>) -> Option<Command> {
+    let rect = ui.max_rect();
+    let appearance = view.appearance;
+    let colors = Palette::new(appearance, view.theme);
+    let painter = ui.painter().clone();
+    let alpha = (view.background_opacity.clamp(0.0, 1.0) * 255.0).round() as u8;
+    let background = Color32::from_rgba_unmultiplied(
+        colors.background.r(),
+        colors.background.g(),
+        colors.background.b(),
+        alpha,
+    );
+    // Rounded as the flyout, but no more than its height allows.
+    let corner = appearance.corner_radius.min((rect.height() / 2.0) as u8);
+    painter.rect_filled(rect, CornerRadius::same(corner), background);
+
+    let response = ui.interact(rect, ui.scope_id().with("expand"), Sense::click());
+    response.widget_info(|| WidgetInfo::labeled(Role::Button, true, &view.labels.expand));
+    if response.hovered() {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+    }
+
+    let top = rect.top() + COMPACT_MARGIN;
+    let mut left = rect.left() + COMPACT_MARGIN;
+    if appearance.show_cover_art {
+        let cover = Rect::from_min_size(pos2(left, top), vec2(COMPACT_COVER, COMPACT_COVER));
+        let cover_corner = (f32::from(corner) * 0.6).min(6.0).round() as u8;
+        let art = view.now_playing.and_then(|track| track.cover.as_ref());
+        if !art.is_some_and(|art| paint_cover(ui, art, cover, cover_corner)) {
+            painter.rect_filled(
+                cover,
+                CornerRadius::same(cover_corner),
+                colors.cover_placeholder,
+            );
+            paint_note(
+                &painter,
+                cover.center(),
+                COMPACT_COVER * 0.45,
+                colors.secondary,
+            );
+        }
+        left = cover.right() + COMPACT_GAP;
+    }
+    let width = rect.right() - COMPACT_MARGIN - left;
+    let (title, artist) = match view.now_playing {
+        Some(track) => (track.title.as_str(), track.artist.as_str()),
+        None => (view.labels.nothing_playing.as_str(), ""),
+    };
+    let (title_top, title_height) = if artist.is_empty() {
+        (top, COMPACT_COVER)
+    } else {
+        (top + 2.0, 24.0)
+    };
+    put_left(
+        ui,
+        Rect::from_min_size(pos2(left, title_top), vec2(width, title_height)),
+        egui::Label::new(RichText::new(title).size(16.0).color(colors.text))
+            .truncate()
+            .selectable(false),
+    );
+    if !artist.is_empty() {
+        put_left(
+            ui,
+            Rect::from_min_size(pos2(left, top + 26.0), vec2(width, 20.0)),
+            egui::Label::new(RichText::new(artist).size(13.0).color(colors.secondary))
+                .truncate()
+                .selectable(false),
+        );
+    }
+    response.clicked().then_some(Command::Expand)
 }
 
 /// Texts shown on the panel, in the user's language.
@@ -67,6 +156,12 @@ pub struct Labels {
     pub close: String,
     /// The settings button (opens the settings window).
     pub settings: String,
+    /// The player button, which lists the players to choose from.
+    pub player: String,
+    /// The choice of following whichever player plays.
+    pub player_auto: String,
+    /// The small panel of a new track, which opens the whole flyout.
+    pub expand: String,
 }
 
 /// Everything the panel shows in one frame.
@@ -90,6 +185,27 @@ pub struct FlyoutView<'a> {
     pub theme: Theme,
     /// Translated texts.
     pub labels: &'a Labels,
+    /// The players there are, to choose from.
+    pub players: &'a [Player],
+    /// The ID of the player chosen to follow, or `None` for whichever
+    /// plays.
+    pub player_choice: Option<&'a str>,
+    /// The ID of the player whose track is shown, if any.
+    pub current_player: Option<&'a str>,
+}
+
+impl FlyoutView<'_> {
+    /// What the player button says: the chosen player, or else the one
+    /// whose track is shown. `None` when there is neither (no button).
+    fn player_label(&self) -> Option<String> {
+        let id = self.player_choice.or(self.current_player)?;
+        let name = self
+            .players
+            .iter()
+            .find(|player| player.id == id)
+            .map_or(id, |player| player.name.as_str());
+        Some(name.to_owned())
+    }
 }
 
 /// The colors of the panel, for its theme and accent color.
@@ -192,6 +308,18 @@ const BUTTON_GAP: f32 = 6.0;
 const SMALL_BUTTON_SIZE: egui::Vec2 = vec2(28.0, 24.0);
 /// Width kept for a time or the percentage next to a bar.
 const BAR_LABEL_WIDTH: f32 = 40.0;
+/// Room for the chevron of the player button, and its widest.
+const PLAYER_CHEVRON: f32 = 10.0;
+const PLAYER_BUTTON_MAX: f32 = 110.0;
+/// Height of a row of the list of players.
+const MENU_ROW: f32 = 22.0;
+const MENU_ROW_MIN: f32 = 16.0;
+/// The small panel of a new track: its margin, the side of its cover art,
+/// the gap after it, and the width of the text.
+const COMPACT_MARGIN: f32 = 12.0;
+const COMPACT_COVER: f32 = 48.0;
+const COMPACT_GAP: f32 = 12.0;
+const COMPACT_TEXT_WIDTH: f32 = 240.0;
 /// Volume change for one step of the mouse wheel over the volume bar (a
 /// notch of most wheels; Windows' volume keys change it by as much).
 const WHEEL_STEP: f32 = 0.02;
@@ -371,9 +499,38 @@ pub fn draw(ui: &mut Ui, view: &FlyoutView<'_>) -> Option<Command> {
             .truncate()
             .selectable(false),
     );
+    // The player button at the right end of the artist's row.
+    let player_button = view.player_label().map(|label| {
+        // One line, ending in "…" when the name is too long.
+        let mut job = egui::text::LayoutJob::simple_singleline(
+            label,
+            FontId::proportional(12.0),
+            colors.secondary,
+        );
+        job.wrap = egui::text::TextWrapping {
+            max_width: PLAYER_BUTTON_MAX - PLAYER_CHEVRON - 12.0,
+            max_rows: 1,
+            break_anywhere: true,
+            overflow_character: Some('…'),
+        };
+        let text = painter.layout_job(job);
+        let width = (text.size().x + PLAYER_CHEVRON + 12.0).min(PLAYER_BUTTON_MAX);
+        let rect = Rect::from_min_size(
+            pos2(right - width, title_rect.bottom() + 1.0),
+            vec2(width, 18.0),
+        );
+        (rect, text)
+    });
+    let artist_width = player_button
+        .as_ref()
+        .map_or(right - left, |(rect, _)| rect.left() - 6.0 - left);
+    let mut menu_toggled = false;
+    if let Some((rect, text)) = player_button {
+        menu_toggled = player_button_ui(ui, rect, text, &labels.player, style, &mut on_control);
+    }
     if !artist.is_empty() {
         let artist_rect =
-            Rect::from_min_size(pos2(left, title_rect.bottom()), vec2(text_width, 20.0));
+            Rect::from_min_size(pos2(left, title_rect.bottom()), vec2(artist_width, 20.0));
         put_left(
             ui,
             artist_rect,
@@ -567,6 +724,15 @@ pub fn draw(ui: &mut Ui, view: &FlyoutView<'_>) -> Option<Command> {
         );
     }
 
+    // The list of players, over the panel's column, on top of the rest.
+    let column = Rect::from_min_max(
+        pos2(left, top - 4.0),
+        pos2(right, rect.bottom() - MARGIN / 2.0),
+    );
+    if let Some(choice) = player_menu(ui, view, column, menu_toggled, &colors, style) {
+        command = Some(Command::ChoosePlayer(choice));
+    }
+
     if let Some(grab) = grab {
         // A drag that starts on a control (off by a few pixels from a
         // click) does not move the flyout.
@@ -626,6 +792,180 @@ fn button(
     );
     // No tooltip: it would not fit in the small window.
     response.clicked()
+}
+
+/// The player button: the player's name and a chevron. Returns whether it
+/// was clicked (which opens or closes the list of players).
+fn player_button_ui(
+    ui: &mut Ui,
+    rect: Rect,
+    text: Arc<egui::Galley>,
+    name: &str,
+    style: ButtonStyle,
+    hovered: &mut bool,
+) -> bool {
+    let colors = &style.colors;
+    let response = ui.allocate_rect(rect, Sense::click());
+    *hovered |= response.hovered();
+    response.widget_info(|| WidgetInfo::labeled(Role::Button, true, name));
+    let fill = if response.is_pointer_button_down_on() {
+        colors.button_pressed
+    } else if response.hovered() {
+        colors.button_hovered
+    } else {
+        colors.button_idle
+    };
+    let painter = ui.painter();
+    painter.rect_filled(rect, CornerRadius::same(style.corner), fill);
+    // The name, cut to the room there is.
+    let room = Rect::from_min_max(
+        pos2(rect.left() + 6.0, rect.top()),
+        pos2(rect.right() - PLAYER_CHEVRON - 2.0, rect.bottom()),
+    );
+    let text_pos = pos2(room.left(), rect.center().y - text.size().y / 2.0);
+    painter
+        .with_clip_rect(room)
+        .galley(text_pos, text, colors.secondary);
+    // A small downward chevron.
+    let (x, y) = (rect.right() - PLAYER_CHEVRON / 2.0 - 3.0, rect.center().y);
+    painter.add(Shape::line(
+        vec![
+            pos2(x - 3.0, y - 1.5),
+            pos2(x, y + 1.5),
+            pos2(x + 3.0, y - 1.5),
+        ],
+        Stroke::new(1.3, colors.secondary),
+    ));
+    response.clicked()
+}
+
+/// Where the list of players keeps whether it is open.
+fn player_menu_id() -> egui::Id {
+    egui::Id::unique("flexflyout-player-menu")
+}
+
+/// Forgets what the panel had open (the list of players), for the host to
+/// call when the flyout hides: the next appearance starts closed, also
+/// after a click elsewhere on the screen, which the panel never sees.
+pub fn reset(ctx: &egui::Context) {
+    ctx.data_mut(|data| data.remove::<bool>(player_menu_id()));
+}
+
+/// The list of players to choose from ("Auto" first), over `area`, while
+/// it is open (`toggled` opens or closes it). Returns the choice made in
+/// this frame: `Some(None)` for "Auto", `Some(Some(i))` for the `i`-th
+/// player. A click elsewhere closes it.
+fn player_menu(
+    ui: &mut Ui,
+    view: &FlyoutView<'_>,
+    area: Rect,
+    toggled: bool,
+    colors: &Palette,
+    style: ButtonStyle,
+) -> Option<Option<usize>> {
+    let id = player_menu_id();
+    let mut open = ui.data(|data| data.get_temp::<bool>(id)).unwrap_or(false);
+    if toggled {
+        open = !open;
+        ui.data_mut(|data| data.insert_temp(id, open));
+        // Drawn (or gone) in the next frame, which nothing else may ask
+        // for soon (a player without a position bar).
+        ui.ctx().request_repaint();
+        // The click that opened it must not close it at once.
+        if open {
+            return None;
+        }
+    }
+    if !open {
+        return None;
+    }
+    // Rows of the usual height, lower when many must fit in the panel.
+    let rows = 1 + view.players.len();
+    let row_height = ((area.height() - 8.0) / rows as f32).clamp(MENU_ROW_MIN, MENU_ROW);
+    let shown = (((area.height() - 8.0) / row_height).floor() as usize).min(rows);
+    let width = area.width().min(200.0);
+    let menu = Rect::from_min_size(
+        pos2(area.right() - width, area.top()),
+        vec2(width, shown as f32 * row_height + 8.0),
+    );
+    let mut chosen = None;
+    let inner = egui::Area::new(id.with("area"))
+        .order(egui::Order::Foreground)
+        .fixed_pos(menu.min)
+        .show(ui.ctx(), |ui| {
+            let painter = ui.painter();
+            painter.rect_filled(menu, CornerRadius::same(style.corner), colors.background);
+            painter.rect_stroke(
+                menu,
+                CornerRadius::same(style.corner),
+                Stroke::new(1.0, colors.bar_track),
+                StrokeKind::Inside,
+            );
+            // Eats the clicks between the rows, which must not reach the
+            // controls below.
+            ui.interact(menu, id.with("back"), Sense::click());
+            let choices = std::iter::once((
+                None,
+                view.labels.player_auto.as_str(),
+                view.player_choice.is_none(),
+            ))
+            .chain(view.players.iter().enumerate().map(|(i, player)| {
+                (
+                    Some(i),
+                    player.name.as_str(),
+                    view.player_choice == Some(player.id.as_str()),
+                )
+            }));
+            for (i, (choice, name, checked)) in choices.take(shown).enumerate() {
+                let row = Rect::from_min_size(
+                    pos2(menu.left() + 4.0, menu.top() + 4.0 + i as f32 * row_height),
+                    vec2(menu.width() - 8.0, row_height),
+                );
+                let response = ui.interact(row, id.with(i), Sense::click());
+                response.widget_info(|| WidgetInfo::selected(Role::CheckBox, true, checked, name));
+                let painter = ui.painter();
+                if response.hovered() {
+                    painter.rect_filled(
+                        row,
+                        CornerRadius::same(style.corner),
+                        colors.button_hovered,
+                    );
+                }
+                if checked {
+                    let (x, y) = (row.left() + 9.0, row.center().y);
+                    painter.add(Shape::line(
+                        vec![
+                            pos2(x - 4.0, y),
+                            pos2(x - 1.0, y + 3.0),
+                            pos2(x + 4.0, y - 3.5),
+                        ],
+                        Stroke::new(1.6, colors.accent),
+                    ));
+                }
+                painter.with_clip_rect(row).text(
+                    pos2(row.left() + 20.0, row.center().y),
+                    Align2::LEFT_CENTER,
+                    name,
+                    FontId::proportional(13.0),
+                    colors.text,
+                );
+                if response.clicked() {
+                    chosen = Some(choice);
+                }
+            }
+        });
+    let clicked_outside = ui.input(|input| {
+        input.pointer.any_click()
+            && input
+                .pointer
+                .interact_pos()
+                .is_some_and(|pos| !inner.response.rect.contains(pos))
+    });
+    if chosen.is_some() || clicked_outside {
+        ui.data_mut(|data| data.insert_temp(id, false));
+        ui.ctx().request_repaint();
+    }
+    chosen
 }
 
 /// A bar the user can click or drag along (`enabled`), at `bar`, showing
@@ -993,8 +1333,25 @@ mod tests {
             pin: "Pin".into(),
             close: "Close".into(),
             settings: "Settings".into(),
+            player: "Player".into(),
+            player_auto: "Auto".into(),
+            expand: "Show all".into(),
         }
     }
+
+    /// Two players, the second one playing.
+    static PLAYERS: std::sync::LazyLock<Vec<Player>> = std::sync::LazyLock::new(|| {
+        vec![
+            Player {
+                id: "Spotify.exe".into(),
+                name: "Spotify".into(),
+            },
+            Player {
+                id: "Chrome".into(),
+                name: "Google Chrome".into(),
+            },
+        ]
+    });
 
     /// A playing track one minute long, 15 seconds in, with shuffle off and
     /// repeat off.
@@ -1051,6 +1408,9 @@ mod tests {
                         appearance,
                         theme: appearance.theme.resolved(Theme::Dark),
                         labels,
+                        players: &PLAYERS,
+                        player_choice: None,
+                        current_player: Some("Chrome"),
                     };
                     commands.extend(draw(ui, &view));
                 },
@@ -1119,6 +1479,9 @@ mod tests {
                         appearance: &DEFAULT,
                         theme: Theme::Dark,
                         labels: &labels,
+                        players: &[],
+                        player_choice: None,
+                        current_player: None,
                     };
                     commands.extend(draw(ui, &view));
                 },
@@ -1225,6 +1588,83 @@ mod tests {
         harness.event(wheel(1.0));
         harness.run();
         assert_eq!(harness.state().len(), count);
+    }
+
+    #[test]
+    fn the_player_button_lists_the_players_to_choose_from() {
+        let now = Instant::now();
+        let track = track(now);
+        let labels = labels();
+        let mut harness = harness(&track, &labels, now);
+        // The button names the player shown; the list is closed.
+        harness.get_by_label("Player");
+        assert!(harness.query_by_label("Auto").is_none());
+        harness.get_by_label("Player").click();
+        harness.run();
+        // Open: "Auto" (chosen) and both players.
+        harness.get_by_label("Auto");
+        harness.get_by_label("Spotify").click();
+        harness.run();
+        assert_eq!(
+            harness.state().last(),
+            Some(&Command::ChoosePlayer(Some(0)))
+        );
+        // Choosing closes it; opening it again and choosing "Auto".
+        harness.run();
+        assert!(harness.query_by_label("Auto").is_none());
+        harness.get_by_label("Player").click();
+        harness.run();
+        harness.get_by_label("Auto").click();
+        harness.run();
+        assert_eq!(harness.state().last(), Some(&Command::ChoosePlayer(None)));
+        // Left open when the flyout hides, it starts closed next time.
+        harness.get_by_label("Player").click();
+        harness.run();
+        harness.get_by_label("Auto");
+        reset(&harness.ctx);
+        harness.run();
+        assert!(harness.query_by_label("Auto").is_none());
+    }
+
+    #[test]
+    fn the_new_track_panel_shows_the_track_and_opens_the_flyout() {
+        let now = Instant::now();
+        let track = track(now);
+        let labels = labels();
+        let mut harness = Harness::builder()
+            .with_size(compact_size(&DEFAULT))
+            .build_ui_state(
+                |ui, commands: &mut Vec<Command>| {
+                    let view = FlyoutView {
+                        now_playing: Some(&track),
+                        volume: None,
+                        pinned: false,
+                        now,
+                        background_opacity: 0.9,
+                        appearance: &DEFAULT,
+                        theme: Theme::Light,
+                        labels: &labels,
+                        players: &[],
+                        player_choice: None,
+                        current_player: None,
+                    };
+                    commands.extend(draw_compact(ui, &view));
+                },
+                Vec::new(),
+            );
+        harness.get_by_label("Title");
+        harness.get_by_label("Artist");
+        harness.get_by_label("Show all").click();
+        harness.run();
+        assert_eq!(harness.state().as_slice(), &[Command::Expand]);
+        // Smaller than the flyout, and narrower without the cover art.
+        let size = compact_size(&DEFAULT);
+        assert!(size.x < panel_size(&DEFAULT).x && size.y < panel_size(&DEFAULT).y);
+        let without = Appearance {
+            show_cover_art: false,
+            ..Appearance::default()
+        };
+        assert!(compact_size(&without).x < size.x);
     }
 
     #[test]

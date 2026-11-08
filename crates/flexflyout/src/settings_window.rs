@@ -16,6 +16,7 @@ use std::time::{Duration, Instant, SystemTime};
 
 use eframe::egui;
 use flexflyout_core::Config;
+use flexflyout_core::NewTrackShow;
 use flexflyout_core::config::{Anchor, Animation, Monitor, NativeOsd, SCALE_RANGE};
 use i18n_embed::fluent::FluentLanguageLoader;
 use i18n_embed_fl::fl;
@@ -80,6 +81,8 @@ struct SettingsWindow {
     autostart: bool,
     /// The monitors, listed when the window opened.
     monitors: Vec<flexflyout_core::layout::MonitorArea>,
+    /// The players, listed when the window opened.
+    players: Vec<flexflyout_core::Player>,
 }
 
 impl SettingsWindow {
@@ -97,6 +100,7 @@ impl SettingsWindow {
             checked_at: Instant::now(),
             autostart: os::autostart_enabled(),
             monitors: os::monitors(),
+            players: os::players(),
         };
         window.read_file();
         Ok(window)
@@ -271,6 +275,10 @@ mod os {
         monitor::list()
     }
 
+    pub fn players() -> Vec<flexflyout_core::Player> {
+        crate::platform::windows::media::list()
+    }
+
     pub fn open_in_editor(path: &Path) {
         tray::open_in_editor(path);
     }
@@ -333,6 +341,10 @@ mod os {
 
     pub fn monitors() -> Vec<MonitorArea> {
         layer::outputs()
+    }
+
+    pub fn players() -> Vec<flexflyout_core::Player> {
+        crate::platform::linux::media::list()
     }
 
     pub fn open_in_editor(path: &Path) {
@@ -408,6 +420,8 @@ impl SettingsWindow {
             self.display(ui);
             ui.add_space(12.0);
             self.appearance(ui);
+            ui.add_space(12.0);
+            self.new_track(ui);
             ui.add_space(12.0);
             self.timing(ui);
             ui.add_space(16.0);
@@ -490,6 +504,36 @@ impl SettingsWindow {
                     ui.end_row();
                 }
             });
+        // The player to follow: "Auto", the players there are, and the one
+        // chosen if it is not running now.
+        ui.horizontal(|ui| {
+            ui.label(fl!(loader, "settings-player"));
+            let player = &mut self.config.general.player;
+            let auto = fl!(loader, "settings-player-auto");
+            let name_of = |id: &str| {
+                if id.eq_ignore_ascii_case("auto") || id.trim().is_empty() {
+                    return auto.clone();
+                }
+                match self.players.iter().find(|p| p.id == id) {
+                    Some(found) => found.name.clone(),
+                    None => format!("{id} ({})", fl!(loader, "settings-player-missing")),
+                }
+            };
+            let mut choices: Vec<String> = vec!["auto".to_owned()];
+            choices.extend(self.players.iter().map(|p| p.id.clone()));
+            if !choices.iter().any(|choice| choice == player) && player.trim() != "" {
+                choices.push(player.clone());
+            }
+            egui::ComboBox::from_id_salt("player")
+                .selected_text(name_of(player))
+                .width(220.0)
+                .show_ui(ui, |ui| {
+                    for choice in choices {
+                        let name = name_of(&choice);
+                        ui.selectable_value(player, choice, name);
+                    }
+                });
+        });
         ui.checkbox(
             &mut self.config.general.show_on_play_pause,
             fl!(loader, "settings-show-on-play-pause"),
@@ -523,86 +567,19 @@ impl SettingsWindow {
             .num_columns(2)
             .spacing([16.0, 8.0])
             .show(ui, |ui| {
-                ui.label(fl!(loader, "settings-monitor"));
-                let monitor_name = |monitor: Monitor| match monitor {
-                    Monitor::Primary => fl!(loader, "settings-monitor-primary"),
-                    Monitor::Cursor => fl!(loader, "settings-monitor-cursor"),
-                    Monitor::Number(number) => {
-                        let name = fl!(loader, "settings-monitor-number", number = number);
-                        match self.monitors.get(number as usize - 1) {
-                            Some(area) => {
-                                let size =
-                                    format!("{}×{}", area.bounds.width(), area.bounds.height());
-                                if area.primary {
-                                    let mark = fl!(loader, "settings-monitor-primary-mark");
-                                    format!("{name} ({size}, {mark})")
-                                } else {
-                                    format!("{name} ({size})")
-                                }
-                            }
-                            None => format!("{name} ({})", fl!(loader, "settings-monitor-missing")),
-                        }
-                    }
-                };
-                let mut choices = vec![Monitor::Primary, Monitor::Cursor];
-                choices.extend((1..=self.monitors.len() as u32).map(Monitor::Number));
-                if !choices.contains(&display.monitor) {
-                    choices.push(display.monitor);
-                }
-                egui::ComboBox::from_id_salt("monitor")
-                    .selected_text(monitor_name(display.monitor))
-                    .width(260.0)
-                    .show_ui(ui, |ui| {
-                        for choice in choices {
-                            ui.selectable_value(&mut display.monitor, choice, monitor_name(choice));
-                        }
-                    });
-                ui.end_row();
-
-                ui.label(fl!(loader, "settings-position"));
-                // The nine anchors, laid out as they are on the screen.
-                egui::Grid::new("anchor")
-                    .spacing([10.0, 6.0])
-                    .show(ui, |ui| {
-                        let rows = [
-                            [Anchor::TopLeft, Anchor::Top, Anchor::TopRight],
-                            [Anchor::Left, Anchor::Center, Anchor::Right],
-                            [Anchor::BottomLeft, Anchor::Bottom, Anchor::BottomRight],
-                        ];
-                        for row in rows {
-                            for anchor in row {
-                                ui.radio_value(&mut display.anchor, anchor, "");
-                            }
-                            ui.end_row();
-                        }
-                    });
-                ui.end_row();
-
-                ui.label(fl!(loader, "settings-offset-x"));
-                ui.add(
-                    egui::DragValue::new(&mut display.offset_x)
-                        .range(-4000..=4000)
-                        .suffix(" px"),
+                placement_rows(
+                    ui,
+                    "display",
+                    loader,
+                    &self.monitors,
+                    PlacementFields {
+                        monitor: &mut display.monitor,
+                        anchor: &mut display.anchor,
+                        offset_x: &mut display.offset_x,
+                        offset_y: &mut display.offset_y,
+                        scale: &mut display.scale,
+                    },
                 );
-                ui.end_row();
-                ui.label(fl!(loader, "settings-offset-y"));
-                ui.add(
-                    egui::DragValue::new(&mut display.offset_y)
-                        .range(-4000..=4000)
-                        .suffix(" px"),
-                );
-                ui.end_row();
-
-                ui.label(fl!(loader, "settings-scale"));
-                ui.add(
-                    egui::Slider::new(&mut display.scale, SCALE_RANGE.0..=SCALE_RANGE.1)
-                        .logarithmic(true)
-                        .step_by(0.05)
-                        .custom_formatter(|value, _| format!("{:.0}%", value * 100.0))
-                        .custom_parser(parse_percent),
-                );
-                ui.end_row();
-
                 ui.label(fl!(loader, "settings-opacity"));
                 ui.add(
                     egui::Slider::new(&mut display.opacity, 0.0..=1.0)
@@ -616,6 +593,66 @@ impl SettingsWindow {
             &mut display.remember_drag,
             fl!(loader, "settings-remember-drag"),
         );
+    }
+
+    /// What a new track shows, for how long, and where.
+    fn new_track(&mut self, ui: &mut egui::Ui) {
+        let loader = &self.loader;
+        ui.heading(fl!(loader, "settings-new-track"));
+        let new_track = &mut self.config.new_track;
+        egui::Grid::new("new-track")
+            .num_columns(2)
+            .spacing([16.0, 8.0])
+            .show(ui, |ui| {
+                ui.label(fl!(loader, "settings-new-track-show"));
+                ui.vertical(|ui| {
+                    for (value, id) in [
+                        (NewTrackShow::Compact, "settings-new-track-compact"),
+                        (NewTrackShow::Flyout, "settings-new-track-flyout"),
+                        (NewTrackShow::Nothing, "settings-new-track-nothing"),
+                    ] {
+                        ui.radio_value(&mut new_track.show, value, loader.get(id));
+                    }
+                });
+                ui.end_row();
+                if new_track.show == NewTrackShow::Compact {
+                    ui.label(fl!(loader, "settings-new-track-hold"));
+                    ui.add(
+                        egui::DragValue::new(&mut new_track.hold_ms)
+                            .range(0..=600_000)
+                            .speed(50.0)
+                            .suffix(" ms"),
+                    );
+                    ui.end_row();
+                }
+            });
+        if new_track.show != NewTrackShow::Compact {
+            return;
+        }
+        ui.checkbox(
+            &mut new_track.same_place,
+            fl!(loader, "settings-new-track-same-place"),
+        );
+        if !new_track.same_place {
+            egui::Grid::new("new-track-place")
+                .num_columns(2)
+                .spacing([16.0, 8.0])
+                .show(ui, |ui| {
+                    placement_rows(
+                        ui,
+                        "new-track",
+                        loader,
+                        &self.monitors,
+                        PlacementFields {
+                            monitor: &mut new_track.monitor,
+                            anchor: &mut new_track.anchor,
+                            offset_x: &mut new_track.offset_x,
+                            offset_y: &mut new_track.offset_y,
+                            scale: &mut new_track.scale,
+                        },
+                    );
+                });
+        }
     }
 
     /// Colors, corners and the parts of the flyout to show.
@@ -749,6 +786,105 @@ impl SettingsWindow {
             Err(err) => self.error = Some(err.to_string()),
         }
     }
+}
+
+/// The placement settings a grid row each edits: the monitor, the anchor,
+/// the offsets and the size.
+struct PlacementFields<'a> {
+    monitor: &'a mut Monitor,
+    anchor: &'a mut Anchor,
+    offset_x: &'a mut i32,
+    offset_y: &'a mut i32,
+    scale: &'a mut f32,
+}
+
+/// The rows of a grid that edit a placement (of the flyout, or of the small
+/// panel of a new track); `id` keeps the two sets of widgets apart.
+fn placement_rows(
+    ui: &mut egui::Ui,
+    id: &str,
+    loader: &FluentLanguageLoader,
+    monitors: &[flexflyout_core::layout::MonitorArea],
+    fields: PlacementFields<'_>,
+) {
+    ui.label(fl!(loader, "settings-monitor"));
+    let monitor_name = |monitor: Monitor| match monitor {
+        Monitor::Primary => fl!(loader, "settings-monitor-primary"),
+        Monitor::Cursor => fl!(loader, "settings-monitor-cursor"),
+        Monitor::Number(number) => {
+            let name = fl!(loader, "settings-monitor-number", number = number);
+            match monitors.get(number as usize - 1) {
+                Some(area) => {
+                    let size = format!("{}×{}", area.bounds.width(), area.bounds.height());
+                    if area.primary {
+                        let mark = fl!(loader, "settings-monitor-primary-mark");
+                        format!("{name} ({size}, {mark})")
+                    } else {
+                        format!("{name} ({size})")
+                    }
+                }
+                None => format!("{name} ({})", fl!(loader, "settings-monitor-missing")),
+            }
+        }
+    };
+    let mut choices = vec![Monitor::Primary, Monitor::Cursor];
+    choices.extend((1..=monitors.len() as u32).map(Monitor::Number));
+    if !choices.contains(fields.monitor) {
+        choices.push(*fields.monitor);
+    }
+    egui::ComboBox::from_id_salt((id, "monitor"))
+        .selected_text(monitor_name(*fields.monitor))
+        .width(260.0)
+        .show_ui(ui, |ui| {
+            for choice in choices {
+                ui.selectable_value(fields.monitor, choice, monitor_name(choice));
+            }
+        });
+    ui.end_row();
+
+    ui.label(fl!(loader, "settings-position"));
+    // The nine anchors, laid out as they are on the screen.
+    egui::Grid::new((id, "anchor"))
+        .spacing([10.0, 6.0])
+        .show(ui, |ui| {
+            let rows = [
+                [Anchor::TopLeft, Anchor::Top, Anchor::TopRight],
+                [Anchor::Left, Anchor::Center, Anchor::Right],
+                [Anchor::BottomLeft, Anchor::Bottom, Anchor::BottomRight],
+            ];
+            for row in rows {
+                for anchor in row {
+                    ui.radio_value(fields.anchor, anchor, "");
+                }
+                ui.end_row();
+            }
+        });
+    ui.end_row();
+
+    ui.label(fl!(loader, "settings-offset-x"));
+    ui.add(
+        egui::DragValue::new(fields.offset_x)
+            .range(-4000..=4000)
+            .suffix(" px"),
+    );
+    ui.end_row();
+    ui.label(fl!(loader, "settings-offset-y"));
+    ui.add(
+        egui::DragValue::new(fields.offset_y)
+            .range(-4000..=4000)
+            .suffix(" px"),
+    );
+    ui.end_row();
+
+    ui.label(fl!(loader, "settings-scale"));
+    ui.add(
+        egui::Slider::new(fields.scale, SCALE_RANGE.0..=SCALE_RANGE.1)
+            .logarithmic(true)
+            .step_by(0.05)
+            .custom_formatter(|value, _| format!("{:.0}%", value * 100.0))
+            .custom_parser(parse_percent),
+    );
+    ui.end_row();
 }
 
 /// Reads "125%" or "125" as 1.25.

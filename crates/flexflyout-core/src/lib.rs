@@ -14,7 +14,7 @@ pub mod layout;
 mod timer;
 pub mod update;
 
-pub use config::{Appearance, Config, Theme};
+pub use config::{Appearance, Config, NewTrackShow, Theme};
 pub use timer::{FlyoutTimer, Timing};
 
 /// Playback state reported by the media player.
@@ -171,6 +171,17 @@ impl fmt::Debug for Cover {
     }
 }
 
+/// A media player the system knows of.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Player {
+    /// What identifies it across runs (the setting `general.player`):
+    /// the app's ID on Windows, the MPRIS name without its instance on
+    /// Linux.
+    pub id: String,
+    /// Its name as people know it ("Spotify", "Google Chrome").
+    pub name: String,
+}
+
 /// Volume of the default output device.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Volume {
@@ -217,6 +228,11 @@ pub enum Command {
     StartMove,
     /// Open the settings window.
     OpenSettings,
+    /// Follow this player (its index in the list the flyout was drawn
+    /// with), or whichever plays (`None`).
+    ChoosePlayer(Option<usize>),
+    /// Show the whole flyout instead of the small panel of a new track.
+    Expand,
 }
 
 #[cfg(test)]
