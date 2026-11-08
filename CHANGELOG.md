@@ -31,6 +31,10 @@ include breaking changes).
   then goes in the layer below full-screen windows.
 
 ### Changed
+- The log of the run before is kept as `flexflyout-previous.log` (and
+  `settings-previous.log`) next to the log, so that starting FlexFlyout
+  again after a crash no longer overwrites what tells why. A log that
+  cannot be written no longer keeps FlexFlyout from starting.
 - Linux: when FlexFlyout cannot start (on GNOME, which lacks layer-shell,
   or in an X11 session), it says why in a notification: started from the
   menu or at login, nothing else would show.

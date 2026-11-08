@@ -118,8 +118,11 @@ fn run(cli: Cli) -> anyhow::Result<()> {
         .log_file
         .clone()
         .unwrap_or_else(|| default_log_dir().join(log_name));
-    init_logging(&log_file)
-        .with_context(|| format!("cannot write the log to {}", log_file.display()))?;
+    // A log that cannot be written is no reason not to run.
+    if let Err(err) = init_logging(&log_file) {
+        eprintln!("cannot write the log to {}: {err:#}", log_file.display());
+    }
+    install_panic_hook();
     log::info!(
         "FlexFlyout {} starting; options: {cli:?}",
         env!("CARGO_PKG_VERSION")
@@ -283,12 +286,28 @@ impl log::Log for Quieter {
     }
 }
 
-/// Writes the log to `path` (overwritten on every start) and logs panics,
-/// which would otherwise vanish in a GUI-subsystem process.
+/// Where the log of the run before is kept: `flexflyout-previous.log` next
+/// to `flexflyout.log`.
+fn previous_log(path: &std::path::Path) -> PathBuf {
+    let stem = path
+        .file_stem()
+        .map_or_else(|| "flexflyout".into(), |stem| stem.to_string_lossy());
+    let name = match path.extension() {
+        Some(extension) => format!("{stem}-previous.{}", extension.to_string_lossy()),
+        None => format!("{stem}-previous"),
+    };
+    path.with_file_name(name)
+}
+
+/// Writes the log to `path`. The log of the run before is kept next to it
+/// (see [`previous_log`]): after a crash, FlexFlyout is usually started
+/// again, which would otherwise overwrite what tells why.
 fn init_logging(path: &std::path::Path) -> anyhow::Result<()> {
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir)?;
     }
+    // Nothing to keep on the first start.
+    let _ = std::fs::rename(path, previous_log(path));
     let file = std::fs::File::create(path)?;
     let config = simplelog::ConfigBuilder::new()
         // The renderer logs a lot at the info level; its warnings still matter
@@ -301,7 +320,12 @@ fn init_logging(path: &std::path::Path) -> anyhow::Result<()> {
     let logger = simplelog::WriteLogger::new(log::LevelFilter::Info, config, file);
     log::set_boxed_logger(Box::new(Quieter(logger)))?;
     log::set_max_level(log::LevelFilter::Info);
+    Ok(())
+}
 
+/// Logs panics, which would otherwise vanish in a GUI-subsystem process,
+/// and leaves the system as it was before the process ends.
+fn install_panic_hook() {
     let default_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
         log::error!("panic: {info}");
@@ -316,12 +340,25 @@ fn init_logging(path: &std::path::Path) -> anyhow::Result<()> {
         platform::linux::native_osd::restore();
         default_hook(info);
     }));
-    Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_previous_log_is_kept_next_to_it() {
+        let dir = std::path::Path::new("logs");
+        assert_eq!(
+            previous_log(&dir.join("flexflyout.log")),
+            dir.join("flexflyout-previous.log")
+        );
+        assert_eq!(
+            previous_log(&dir.join("settings.log")),
+            dir.join("settings-previous.log")
+        );
+        assert_eq!(previous_log(&dir.join("trace")), dir.join("trace-previous"));
+    }
 
     #[test]
     fn the_d_bus_chatter_stays_out_of_the_log() {
