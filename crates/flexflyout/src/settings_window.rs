@@ -273,6 +273,11 @@ mod os {
         autostart::is_enabled()
     }
 
+    /// Whether the Microsoft Store brings the new versions (an MSIX package).
+    pub fn updated_by_store() -> bool {
+        crate::platform::windows::package::is_packaged()
+    }
+
     pub fn set_autostart(enabled: bool, config_file: &Path) -> anyhow::Result<()> {
         autostart::set(enabled, config_file)
     }
@@ -339,6 +344,11 @@ mod os {
 
     pub fn autostart_enabled() -> bool {
         desktop::autostart_enabled()
+    }
+
+    /// Never on Linux: no store brings the new versions.
+    pub fn updated_by_store() -> bool {
+        false
     }
 
     pub fn set_autostart(enabled: bool, config_file: &Path) -> anyhow::Result<()> {
@@ -548,10 +558,13 @@ impl SettingsWindow {
             &mut self.config.general.show_over_fullscreen,
             fl!(loader, "settings-show-over-fullscreen"),
         );
-        ui.checkbox(
-            &mut self.config.general.check_updates,
-            fl!(loader, "settings-check-updates"),
-        );
+        // From the Microsoft Store, the Store brings the new versions.
+        if !os::updated_by_store() {
+            ui.checkbox(
+                &mut self.config.general.check_updates,
+                fl!(loader, "settings-check-updates"),
+            );
+        }
         let mut autostart = self.autostart;
         if ui
             .checkbox(&mut autostart, autostart_label(loader))

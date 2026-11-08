@@ -61,7 +61,8 @@ struct Cli {
     lang: Option<String>,
 
     /// Settings file, written with the defaults if it does not exist
-    /// (default: %APPDATA%\flexflyout\config.toml on Windows).
+    /// (default: %APPDATA%\flexflyout\config.toml on Windows, or the
+    /// package's LocalState folder when installed from the Microsoft Store).
     #[arg(long, value_name = "PATH")]
     config: Option<PathBuf>,
 
@@ -72,7 +73,8 @@ struct Cli {
 
     /// Where to write the log (default: flexflyout.log, or settings.log
     /// with --settings, in %LOCALAPPDATA%\flexflyout on Windows and in
-    /// ~/.local/state/flexflyout on Linux).
+    /// ~/.local/state/flexflyout on Linux; with the settings in the package's
+    /// LocalState folder when installed from the Microsoft Store).
     #[arg(long, value_name = "PATH")]
     log_file: Option<PathBuf>,
 
@@ -196,6 +198,12 @@ fn start_update_check(cli: &Cli, config: &flexflyout_core::Config) {
         None if cli.demo => return,
         None => (env!("CARGO_PKG_VERSION").to_owned(), update::FIRST_CHECK),
     };
+    // From the Microsoft Store, the Store brings the new versions.
+    #[cfg(windows)]
+    if cli.check_update_as.is_none() && platform::windows::package::is_packaged() {
+        log::info!("not looking for new versions: the Microsoft Store updates this app");
+        return;
+    }
     // The notice is in the language at the start.
     let loader = match i18n::load(settings::language(cli.lang.as_deref(), config).as_deref()) {
         Ok(loader) => loader,
@@ -241,8 +249,13 @@ fn start_update_check(cli: &Cli, config: &flexflyout_core::Config) {
 
 /// Default folder of the logs: next to the other per-user data of the app.
 /// `%LOCALAPPDATA%` on Windows, `$XDG_STATE_HOME` (or `~/.local/state`)
-/// elsewhere.
+/// elsewhere. From the Microsoft Store (an MSIX package), the package's
+/// own folder, next to the settings (see `settings::default_file`).
 pub(crate) fn default_log_dir() -> PathBuf {
+    #[cfg(windows)]
+    if let Some(folder) = platform::windows::package::local_state() {
+        return folder;
+    }
     let base = std::env::var_os("LOCALAPPDATA")
         .or_else(|| std::env::var_os("XDG_STATE_HOME").filter(|dir| !dir.is_empty()))
         .map(PathBuf::from)

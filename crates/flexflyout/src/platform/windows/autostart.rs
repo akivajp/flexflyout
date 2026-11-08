@@ -4,6 +4,11 @@
 //! removing it; it then writes a value under `StartupApproved\Run` whose
 //! first byte is odd. Such an entry counts as off, and turning it on again
 //! here removes that mark (the user asked for it explicitly).
+//!
+//! From the Microsoft Store (an MSIX package), the startup task declared in
+//! the package's manifest instead: Windows redirects a packaged app's
+//! writes to `HKCU` into a private copy, so a "Run" entry would never be
+//! read at sign-in (and the program's path changes with every update).
 
 use std::ffi::OsString;
 use std::path::Path;
@@ -26,6 +31,9 @@ const NAME: windows::core::PCWSTR = w!("FlexFlyout");
 
 /// Whether FlexFlyout starts with Windows.
 pub fn is_enabled() -> bool {
+    if super::package::is_packaged() {
+        return startup_task::is_enabled();
+    }
     // SAFETY: a size query of a value; nothing is written.
     let exists = unsafe {
         RegGetValueW(
@@ -46,6 +54,16 @@ pub fn is_enabled() -> bool {
 /// `--config` when it is not the default one), or stops it from doing so.
 pub fn set(enabled: bool, config_file: &Path) -> anyhow::Result<()> {
     let config = (config_file != crate::settings::default_file()).then_some(config_file);
+    if super::package::is_packaged() {
+        if enabled && let Some(config) = config {
+            // A startup task cannot pass arguments.
+            log::warn!(
+                "starting with Windows reads the default settings, not {}",
+                config.display()
+            );
+        }
+        return startup_task::set(enabled);
+    }
     if !enabled {
         // SAFETY: deletes our own value.
         let result = unsafe { RegDeleteKeyValueW(HKEY_CURRENT_USER, RUN, NAME) };
@@ -108,5 +126,63 @@ fn ok_or_missing(result: WIN32_ERROR) -> windows::core::Result<()> {
         Ok(())
     } else {
         result.ok()
+    }
+}
+
+/// The package's startup task (`windows.startupTask` in
+/// `packaging/msix/AppxManifest.xml`), for an app from the Microsoft Store.
+mod startup_task {
+    use anyhow::{Context as _, bail};
+    use windows::ApplicationModel::{StartupTask, StartupTaskState};
+    use windows::core::HSTRING;
+
+    /// The task's ID in the manifest.
+    const TASK_ID: &str = "FlexFlyout";
+
+    /// Our startup task.
+    fn task() -> windows::core::Result<StartupTask> {
+        StartupTask::GetAsync(&HSTRING::from(TASK_ID))?.join()
+    }
+
+    /// Whether the task runs at sign-in.
+    pub fn is_enabled() -> bool {
+        match task().and_then(|task| task.State()) {
+            Ok(state) => {
+                state == StartupTaskState::Enabled || state == StartupTaskState::EnabledByPolicy
+            }
+            Err(err) => {
+                log::warn!("cannot read the startup task: {err}");
+                false
+            }
+        }
+    }
+
+    /// Turns the task on or off. Once the user turned it off in the Task
+    /// Manager or in Settings, only they can turn it on again (there).
+    pub fn set(enabled: bool) -> anyhow::Result<()> {
+        let task = task().context("cannot find the startup task")?;
+        if !enabled {
+            task.Disable().context("cannot turn off the startup task")?;
+            log::info!("does not start with Windows (startup task)");
+            return Ok(());
+        }
+        let state = task
+            .RequestEnableAsync()
+            .and_then(|operation| operation.join())
+            .context("cannot turn on the startup task")?;
+        match state {
+            StartupTaskState::Enabled | StartupTaskState::EnabledByPolicy => {
+                log::info!("starts with Windows (startup task)");
+                Ok(())
+            }
+            StartupTaskState::DisabledByUser => bail!(
+                "starting with Windows was turned off in the Task Manager or in Settings; \
+                 turn it on there (Startup apps)"
+            ),
+            StartupTaskState::DisabledByPolicy => {
+                bail!("starting with Windows is turned off by a policy")
+            }
+            other => bail!("the startup task stayed off ({other:?})"),
+        }
     }
 }

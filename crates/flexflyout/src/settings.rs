@@ -17,8 +17,14 @@ const WATCH_INTERVAL: Duration = Duration::from_secs(1);
 
 /// Default place of the settings: `%APPDATA%\flexflyout\config.toml` on
 /// Windows, `$XDG_CONFIG_HOME/flexflyout/config.toml` (or `~/.config/...`)
-/// elsewhere.
+/// elsewhere. From the Microsoft Store (an MSIX package), the package's
+/// own folder instead: `%APPDATA%` would be redirected into a copy that
+/// Notepad, opened from the tray, cannot see.
 pub fn default_file() -> PathBuf {
+    #[cfg(windows)]
+    if let Some(folder) = crate::platform::windows::package::local_state() {
+        return folder.join("config.toml");
+    }
     let base = std::env::var_os("APPDATA")
         .or_else(|| std::env::var_os("XDG_CONFIG_HOME"))
         .map(PathBuf::from)
