@@ -7,6 +7,11 @@ include breaking changes).
 
 ## [Unreleased]
 
+### Added
+- The settings window has − and + buttons next to its numbers (the
+  offsets, the size, the opacity, the corners and the times), for fine
+  adjustments without typing; held, they keep going.
+
 ## [0.8.0] - 2026-11-08
 
 ### Added

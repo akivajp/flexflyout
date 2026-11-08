@@ -11,6 +11,7 @@
 //! down, and the settings window costs no memory once closed. Only one is
 //! open at a time: a second one brings the first to the front and ends.
 
+use std::ops::RangeInclusive;
 use std::path::PathBuf;
 use std::time::{Duration, Instant, SystemTime};
 
@@ -27,6 +28,11 @@ const SAVE_DELAY: Duration = Duration::from_millis(300);
 
 /// How often the file is checked for changes made elsewhere.
 const FILE_CHECK: Duration = Duration::from_secs(1);
+
+/// How long a "−" or "+" button must be held before the value keeps
+/// changing, and how often it changes then (in seconds, egui's clock).
+const REPEAT_DELAY: f64 = 0.4;
+const REPEAT_INTERVAL: f64 = 0.05;
 
 /// Languages offered, besides the system's: code and name (in itself).
 const LANGUAGES: [(&str, &str); 2] = [("en", "English"), ("ja", "日本語")];
@@ -581,12 +587,15 @@ impl SettingsWindow {
                     },
                 );
                 ui.label(fl!(loader, "settings-opacity"));
-                ui.add(
-                    egui::Slider::new(&mut display.opacity, 0.0..=1.0)
-                        .step_by(0.01)
-                        .custom_formatter(|value, _| format!("{:.0}%", value * 100.0))
-                        .custom_parser(parse_percent),
-                );
+                ui.horizontal(|ui| {
+                    ui.add(
+                        egui::Slider::new(&mut display.opacity, 0.0..=1.0)
+                            .step_by(0.01)
+                            .custom_formatter(|value, _| format!("{:.0}%", value * 100.0))
+                            .custom_parser(parse_percent),
+                    );
+                    steppers(ui, loader, &mut display.opacity, 0.01, 0.0..=1.0);
+                });
                 ui.end_row();
             });
         ui.checkbox(
@@ -617,12 +626,15 @@ impl SettingsWindow {
                 ui.end_row();
                 if new_track.show == NewTrackShow::Compact {
                     ui.label(fl!(loader, "settings-new-track-hold"));
-                    ui.add(
-                        egui::DragValue::new(&mut new_track.hold_ms)
-                            .range(0..=600_000)
-                            .speed(50.0)
-                            .suffix(" ms"),
-                    );
+                    ui.horizontal(|ui| {
+                        ui.add(
+                            egui::DragValue::new(&mut new_track.hold_ms)
+                                .range(0..=600_000)
+                                .speed(50.0)
+                                .suffix(" ms"),
+                        );
+                        steppers(ui, loader, &mut new_track.hold_ms, 100.0, 0.0..=600_000.0);
+                    });
                     ui.end_row();
                 }
             });
@@ -708,10 +720,19 @@ impl SettingsWindow {
                 ui.end_row();
 
                 ui.label(fl!(loader, "settings-corner-radius"));
-                ui.add(
-                    egui::Slider::new(&mut appearance.corner_radius, 0..=MAX_CORNER_RADIUS)
-                        .suffix(" px"),
-                );
+                ui.horizontal(|ui| {
+                    ui.add(
+                        egui::Slider::new(&mut appearance.corner_radius, 0..=MAX_CORNER_RADIUS)
+                            .suffix(" px"),
+                    );
+                    steppers(
+                        ui,
+                        loader,
+                        &mut appearance.corner_radius,
+                        1.0,
+                        0.0..=f64::from(MAX_CORNER_RADIUS),
+                    );
+                });
                 ui.end_row();
 
                 ui.label(fl!(loader, "settings-parts"));
@@ -742,18 +763,34 @@ impl SettingsWindow {
             .num_columns(2)
             .spacing([16.0, 8.0])
             .show(ui, |ui| {
-                for (id, value, max, speed) in [
-                    ("settings-fade-in", &mut timing.fade_in_ms, max_fade, 5.0),
-                    ("settings-hold", &mut timing.hold_ms, 600_000, 50.0),
-                    ("settings-fade-out", &mut timing.fade_out_ms, max_fade, 5.0),
+                // The speed of a drag, and the step of the "−" and "+" buttons.
+                for (id, value, max, speed, step) in [
+                    (
+                        "settings-fade-in",
+                        &mut timing.fade_in_ms,
+                        max_fade,
+                        5.0,
+                        10.0,
+                    ),
+                    ("settings-hold", &mut timing.hold_ms, 600_000, 50.0, 100.0),
+                    (
+                        "settings-fade-out",
+                        &mut timing.fade_out_ms,
+                        max_fade,
+                        5.0,
+                        10.0,
+                    ),
                 ] {
                     ui.label(loader.get(id));
-                    ui.add(
-                        egui::DragValue::new(value)
-                            .range(0..=max)
-                            .speed(speed)
-                            .suffix(" ms"),
-                    );
+                    ui.horizontal(|ui| {
+                        ui.add(
+                            egui::DragValue::new(&mut *value)
+                                .range(0..=max)
+                                .speed(speed)
+                                .suffix(" ms"),
+                        );
+                        steppers(ui, loader, value, step, 0.0..=max as f64);
+                    });
                     ui.end_row();
                 }
                 ui.label(loader.get("settings-animation"));
@@ -861,34 +898,170 @@ fn placement_rows(
         });
     ui.end_row();
 
-    ui.label(fl!(loader, "settings-offset-x"));
-    ui.add(
-        egui::DragValue::new(fields.offset_x)
-            .range(-4000..=4000)
-            .suffix(" px"),
-    );
-    ui.end_row();
-    ui.label(fl!(loader, "settings-offset-y"));
-    ui.add(
-        egui::DragValue::new(fields.offset_y)
-            .range(-4000..=4000)
-            .suffix(" px"),
-    );
-    ui.end_row();
+    for (label, offset) in [
+        (fl!(loader, "settings-offset-x"), fields.offset_x),
+        (fl!(loader, "settings-offset-y"), fields.offset_y),
+    ] {
+        ui.label(label);
+        ui.horizontal(|ui| {
+            ui.add(
+                egui::DragValue::new(&mut *offset)
+                    .range(-4000..=4000)
+                    .suffix(" px"),
+            );
+            steppers(ui, loader, offset, 1.0, -4000.0..=4000.0);
+        });
+        ui.end_row();
+    }
 
     ui.label(fl!(loader, "settings-scale"));
-    ui.add(
-        egui::Slider::new(fields.scale, SCALE_RANGE.0..=SCALE_RANGE.1)
-            .logarithmic(true)
-            .step_by(0.05)
-            .custom_formatter(|value, _| format!("{:.0}%", value * 100.0))
-            .custom_parser(parse_percent),
-    );
+    ui.horizontal(|ui| {
+        ui.add(
+            egui::Slider::new(&mut *fields.scale, SCALE_RANGE.0..=SCALE_RANGE.1)
+                .logarithmic(true)
+                .step_by(0.05)
+                .custom_formatter(|value, _| format!("{:.0}%", value * 100.0))
+                .custom_parser(parse_percent),
+        );
+        steppers(
+            ui,
+            loader,
+            fields.scale,
+            0.05,
+            f64::from(SCALE_RANGE.0)..=f64::from(SCALE_RANGE.1),
+        );
+    });
     ui.end_row();
+}
+
+/// "−" and "+" buttons after a number, for fine adjustments without typing:
+/// each changes `value` to the next multiple of `step` down or up, within
+/// `range`, once per click and repeatedly while held.
+fn steppers<T: egui::emath::Numeric>(
+    ui: &mut egui::Ui,
+    loader: &FluentLanguageLoader,
+    value: &mut T,
+    step: f64,
+    range: RangeInclusive<f64>,
+) {
+    let current = value.to_f64();
+    let buttons = [
+        (false, "\u{2212}", fl!(loader, "settings-decrease")),
+        (true, "+", fl!(loader, "settings-increase")),
+    ];
+    for (up, text, hint) in buttons {
+        let room = if up {
+            current < *range.end()
+        } else {
+            current > *range.start()
+        };
+        for _ in 0..step_button(ui, text, room, &hint) {
+            *value = T::from_f64(stepped(value.to_f64(), step, up, &range));
+        }
+    }
+}
+
+/// A small button of [`steppers`]: by how many steps its value should change
+/// in this frame (one at once when pressed, then more after a moment while
+/// held, or one when pressed from the keyboard).
+fn step_button(ui: &mut egui::Ui, text: &str, enabled: bool, hint: &str) -> u32 {
+    let response = ui
+        .add_enabled(
+            enabled,
+            egui::Button::new(text).min_size(egui::vec2(22.0, 0.0)),
+        )
+        .on_hover_text(hint);
+    // A button's text is a sign; tell screen readers what it does.
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, enabled, hint));
+    let id = response.id;
+    let (now, button_down) = ui.input(|input| (input.time, input.pointer.primary_down()));
+    // When it was pressed, and how many steps it has made since.
+    let held = ui.data(|data| data.get_temp::<(f64, u32)>(id));
+    // egui tells when the press starts on the button, but stops telling
+    // after the longest a click may take (0.8 s): from then on it is held
+    // while the button stays down over it.
+    let down = match held {
+        None => response.is_pointer_button_down_on(),
+        Some(_) => button_down && response.contains_pointer(),
+    };
+    if enabled && down {
+        // While held, egui must keep drawing for the repeats to come.
+        ui.ctx().request_repaint();
+        let (pressed, done) = held.unwrap_or((now, 0));
+        let due = steps_held(now - pressed);
+        ui.data_mut(|data| data.insert_temp(id, (pressed, due)));
+        return due.saturating_sub(done);
+    }
+    ui.data_mut(|data| data.remove::<(f64, u32)>(id));
+    // Space or Enter on the focused button (a mouse click has been counted
+    // already, when it was pressed).
+    u32::from(response.clicked() && !response.clicked_by(egui::PointerButton::Primary))
+}
+
+/// How many steps a button held for `seconds` has made in all: one when
+/// pressed, then one every [`REPEAT_INTERVAL`] after [`REPEAT_DELAY`]. By
+/// the time rather than by the frames, so that it keeps the same pace
+/// however often the window is drawn.
+fn steps_held(seconds: f64) -> u32 {
+    if seconds < REPEAT_DELAY {
+        1
+    } else {
+        2 + ((seconds - REPEAT_DELAY) / REPEAT_INTERVAL) as u32
+    }
+}
+
+/// The next multiple of `step` above (`up`) or below `value`, within
+/// `range`. A value between two multiples (typed in by hand) goes to the
+/// nearer one in that direction rather than by a whole step.
+fn stepped(value: f64, step: f64, up: bool, range: &RangeInclusive<f64>) -> f64 {
+    // Tolerates the rounding of values such as 0.92 (f32) / 0.01.
+    const EPSILON: f64 = 1e-6;
+    let steps = value / step;
+    let next = if up {
+        (steps + EPSILON).floor() + 1.0
+    } else {
+        (steps - EPSILON).ceil() - 1.0
+    };
+    (next * step).clamp(*range.start(), *range.end())
 }
 
 /// Reads "125%" or "125" as 1.25.
 fn parse_percent(text: &str) -> Option<f64> {
     let number: f64 = text.trim().trim_end_matches('%').trim().parse().ok()?;
     Some(number / 100.0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_held_button_keeps_its_pace() {
+        assert_eq!(steps_held(0.0), 1);
+        assert_eq!(steps_held(REPEAT_DELAY - 0.01), 1);
+        assert_eq!(steps_held(REPEAT_DELAY), 2);
+        // Held 1.5 s: 1 + 1 + 1.1 s / 0.05 s.
+        assert_eq!(steps_held(1.5), 24);
+    }
+
+    #[test]
+    fn steps_go_to_the_next_multiple_within_the_range() {
+        let px = -4000.0..=4000.0;
+        assert_eq!(stepped(24.0, 1.0, true, &px), 25.0);
+        assert_eq!(stepped(0.0, 1.0, false, &px), -1.0);
+        assert_eq!(stepped(4000.0, 1.0, true, &px), 4000.0);
+        // A value typed in between two multiples goes to the nearer one in
+        // that direction.
+        let ms = 0.0..=600_000.0;
+        assert_eq!(stepped(3050.0, 100.0, true, &ms), 3100.0);
+        assert_eq!(stepped(3050.0, 100.0, false, &ms), 3000.0);
+        assert_eq!(stepped(50.0, 100.0, false, &ms), 0.0);
+        // Fractions as the settings hold them (f32), without drifting.
+        let up = stepped(f64::from(0.92_f32), 0.01, true, &(0.0..=1.0));
+        assert!((up - 0.93).abs() < 1e-9, "{up}");
+        let down = stepped(f64::from(1.35_f32), 0.05, false, &(0.5..=4.0));
+        assert!((down - 1.30).abs() < 1e-9, "{down}");
+        let up = stepped(f64::from(1.35_f32), 0.05, true, &(0.5..=4.0));
+        assert!((up - 1.40).abs() < 1e-9, "{up}");
+    }
 }
