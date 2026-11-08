@@ -63,7 +63,7 @@ fn query_family_name() -> Option<String> {
         return None;
     }
     // `length` counts the terminating zero.
-    let name = String::from_utf16_lossy(&buffer[..(length as usize).saturating_sub(1)]);
-    log::info!("running from the package {name}");
-    Some(name)
+    Some(String::from_utf16_lossy(
+        &buffer[..(length as usize).saturating_sub(1)],
+    ))
 }

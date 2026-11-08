@@ -70,6 +70,27 @@ jobs:
           if ($env:MSIX_PUBLISHER_DISPLAY_NAME) { $params.PublisherDisplayName = $env:MSIX_PUBLISHER_DISPLAY_NAME }
           ./packaging/msix/build.ps1 @params
           Get-ChildItem msix
+      # The checks Partner Center runs on a submission, run here first
+      # (installs the test copy). The report is kept with the package.
+      - name: Windows App Certification Kit
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          $appcert = "${env:ProgramFiles(x86)}\Windows Kits\10\App Certification Kit\appcert.exe"
+          if (-not (Test-Path $appcert)) { Write-Host "the App Certification Kit is not installed"; exit 0 }
+          $cer = Get-ChildItem msix/*-test.cer | Select-Object -First 1
+          $test = Get-ChildItem msix/*-test.msix | Select-Object -First 1
+          Import-Certificate -FilePath $cer.FullName -CertStoreLocation Cert:\LocalMachine\TrustedPeople | Out-Null
+          & $appcert reset
+          & $appcert test -appxpackagepath $test.FullName -reportoutputpath "$PWD\msix\wack-report.xml"
+          Write-Host "appcert exit code: $LASTEXITCODE"
+          if (Test-Path msix/wack-report.xml) {
+            [xml] $report = Get-Content -Raw msix/wack-report.xml
+            Write-Host "Overall: $($report.REPORT.OVERALL_RESULT)"
+            $report.SelectNodes("//TEST[RESULT!='PASS']") | ForEach-Object {
+              Write-Host "$($_.RESULT): $($_.NAME)"
+            }
+          }
       - uses: actions/upload-artifact@v7
         with:
           name: flexflyout-msix

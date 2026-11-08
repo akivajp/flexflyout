@@ -129,6 +129,10 @@ fn run(cli: Cli) -> anyhow::Result<()> {
         "FlexFlyout {} starting; options: {cli:?}",
         env!("CARGO_PKG_VERSION")
     );
+    #[cfg(windows)]
+    if let Some(package) = platform::windows::package::family_name() {
+        log::info!("running from the package {package} (the Microsoft Store)");
+    }
 
     let config_file = cli.config.clone().unwrap_or_else(settings::default_file);
     let config = settings::load_at_start(&config_file);

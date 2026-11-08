@@ -69,6 +69,12 @@ Set-Content -Encoding utf8 (Join-Path $layout "AppxManifest.xml") $manifest
 # the like for the names in the manifest.
 $priconfig = Join-Path $work "priconfig.xml"
 Invoke-Tool "$sdk\makepri.exe" @("createconfig", "/cf", $priconfig, "/dq", "en-US", "/pv", "10.0.0", "/o")
+# The default configuration splits the scaled images into resources.scale-*.pri
+# for resource packages (bundles); one package needs them all in resources.pri.
+[xml] $config = Get-Content -Raw $priconfig
+$packaging = $config.SelectSingleNode("/resources/packaging")
+if ($packaging) { [void] $packaging.ParentNode.RemoveChild($packaging) }
+$config.Save($priconfig)
 Invoke-Tool "$sdk\makepri.exe" @("new", "/pr", $layout, "/cf", $priconfig,
   "/mn", (Join-Path $layout "AppxManifest.xml"), "/of", (Join-Path $layout "resources.pri"), "/o")
 
