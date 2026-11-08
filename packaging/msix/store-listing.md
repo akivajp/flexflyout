@@ -15,7 +15,7 @@ What to enter in Partner Center for FlexFlyout (Apps and games > FlexFlyout > St
 - **Privacy policy**: choose that the app uses personal information, and give <https://github.com/akivajp/flexflyout#privacy>. FlexFlyout keeps nothing, but its low-level keyboard hook receives every key press (it only looks at the volume and media keys), which the Store's policy may count as accessing personal information; the README's Privacy section says exactly what it does.
 - **Website**: <https://github.com/akivajp/flexflyout>
 - **Support contact info**: <https://github.com/akivajp/flexflyout/issues>
-- **Product declarations**: leave "accessibility guidelines" unchecked (not tested with the Store's checklist); keep "Customers can install this app to alternate drives" checked; leave "depends on non-Microsoft drivers or NT services" unchecked.
+- **Product declarations**: the defaults. Off: purchases outside the Store's commerce (there are none), "tested to meet accessibility guidelines" (not tested with the Store's checklist), pen and ink, and generative AI features (the app has none; how it was developed does not count). On: installing to alternate drives, OneDrive backup of the app's data (the settings and a small log, which then follow the user to a new PC), and recording clips (meant for games, harmless here).
 - **System requirements**: nothing beyond Windows 11 (a keyboard with volume or media keys helps, but the flyout also shows on any volume change).
 
 ## Age ratings
