@@ -7,74 +7,44 @@ include breaking changes).
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-11-08
+
 ### Added
-- Titles and artists in scripts the flyout's own fonts lack (Korean,
-  Chinese, Thai, Hindi…) show in the system's fonts instead of as empty
-  boxes. They are found through the system's font fallback (DirectWrite
-  on Windows, fontconfig on Linux) when first needed.
-- KDE Plasma: the volume and media keys show the flyout themselves, as
-  on Windows, so a volume key shows it also at 0% and 100%, where the
-  volume does not change. FlexFlyout follows Plasma's announcements of
-  these two kinds of shortcuts only.
-- Turning the mouse wheel over the volume bar changes the volume, by 2%
-  a notch.
-- The tray icon's tooltip shows the track that plays.
-- `appearance.theme = "system"` (or "Same as the system" in the settings
-  window) follows the system's light or dark mode: Windows' mode, or the
-  desktop's color scheme on Linux (through xdg-desktop-portal), also when
-  it changes while FlexFlyout runs.
-- `general.show_over_fullscreen` (on by default, and in the settings
-  window): turned off, a volume change, a key or a new track does not
-  bring the flyout up over a full-screen game or video on its monitor (it
-  still shows on the other monitors, and from the tray icon). On Windows
-  it follows Windows' own test for full-screen apps; on Linux the flyout
-  then goes in the layer below full-screen windows.
+- Titles in scripts the flyout's own fonts lack (Korean, Chinese, Thai…)
+  show in the system's fonts instead of as empty boxes.
+- The mouse wheel over the volume bar changes the volume (2% a notch).
+- The tray icon's tooltip shows the playing track.
+- `appearance.theme = "system"` ("Same as the system" in the settings
+  window) follows the system's light or dark mode, also when it changes.
+- `general.show_over_fullscreen` (on by default): turned off, the flyout
+  no longer comes up by itself over a full-screen game or video on its
+  monitor.
+- KDE Plasma: the volume and media keys show the flyout, also at 0% and
+  100% volume.
 
 ### Changed
-- The log of the run before is kept as `flexflyout-previous.log` (and
-  `settings-previous.log`) next to the log, so that starting FlexFlyout
-  again after a crash no longer overwrites what tells why. A log that
-  cannot be written no longer keeps FlexFlyout from starting.
-- Linux: when FlexFlyout cannot start (on GNOME, which lacks layer-shell,
-  or in an X11 session), it says why in a notification: started from the
-  menu or at login, nothing else would show.
+- The previous run's log is kept as `flexflyout-previous.log`. A log that
+  cannot be written no longer stops FlexFlyout from starting.
+- Linux: when FlexFlyout cannot start (GNOME, X11), it says why in a
+  notification.
 
 ### Fixed
-- Starting FlexFlyout again while it ran (from the Start menu or the app
-  menu, say) started a second one: two flyouts at every change, two tray
-  icons, and an emptied log of the first one. It now opens the settings
-  window instead, and leaves the running one alone.
-- The tray icon could be missing for the whole session when FlexFlyout
-  started before the panel or the taskbar was ready (at login, say). On
-  Linux it now waits for the panel's tray, and comes back when the panel
-  restarts; on Windows adding it is tried again for a while.
-- Windows: a track that a player could not tell yet (Media Player
-  answers "not ready" while it sets up) showed as nothing playing, and
-  the same track then came up again as a new one. It is now read again a
-  moment later, and the flyout keeps what it showed meanwhile.
-- KDE Plasma: `monitor = "primary"` (the default) left the choice to KWin,
-  which shows the flyout on the active screen (where the mouse pointer
-  is), not on the primary one. FlexFlyout now asks Plasma for its screen
-  order and puts it on the primary screen, and the settings window marks
-  that screen as the primary one. Other compositors have no primary
-  screen and choose as before.
-- Linux: after the sound server restarted (PipeWire does after an update,
-  or when restarted to fix a Bluetooth device), or when it was not up yet
-  at login, the flyout no longer followed the volume. FlexFlyout now
-  connects again.
-- Linux: the volume bar set every channel to the same level, losing the
-  balance between left and right. It now keeps it.
-- Linux: cover art given as a web address (Spotify) held up the flyout of
-  a new track, and the controls, until it was downloaded: up to ten
-  seconds on a slow network. The track now shows at once, and its cover
-  art follows.
-- Linux: ending FlexFlyout with a signal (at logout, or with `kill` or
-  Ctrl+C) left Plasma's volume popup hidden, with `native_osd = "hide"`,
-  until FlexFlyout started again. It now closes as Quit in the tray menu
-  does, and brings the popup back.
-- The update check tried again only a day later when it got no answer
-  (no network yet after the start, say). It now tries again within an
-  hour.
+- Starting FlexFlyout again while it runs opens the settings window
+  instead of starting a second copy.
+- The tray icon no longer goes missing when FlexFlyout starts before the
+  taskbar or the panel (at login).
+- KDE Plasma: `monitor = "primary"` (the default) now uses Plasma's
+  primary screen; it used the screen under the mouse pointer.
+- Linux: the volume is followed again after PipeWire or PulseAudio
+  restarts.
+- Linux: the volume bar keeps the balance between left and right.
+- Linux: cover art from the web (Spotify) no longer delays the flyout of
+  a new track.
+- Linux: Plasma's volume popup, when hidden, comes back also when
+  FlexFlyout is ended by a signal (at logout, `kill`, Ctrl+C).
+- Windows: a track that Media Player is still setting up no longer shows
+  as "nothing playing" first.
+- The update check tries again within an hour when it gets no answer.
 
 ## [0.6.0] - 2026-11-05
 
@@ -184,7 +154,8 @@ The first release, for Windows 11.
 - English and Japanese.
 - `flexflyout --demo` shows sample tracks.
 
-[Unreleased]: https://github.com/akivajp/flexflyout/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/akivajp/flexflyout/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/akivajp/flexflyout/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/akivajp/flexflyout/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/akivajp/flexflyout/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/akivajp/flexflyout/compare/v0.3.2...v0.4.0

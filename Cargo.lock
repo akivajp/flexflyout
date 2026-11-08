@@ -1154,7 +1154,7 @@ dependencies = [
 
 [[package]]
 name = "flexflyout"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "anyhow",
  "async-signal",
@@ -1192,7 +1192,7 @@ dependencies = [
 
 [[package]]
 name = "flexflyout-core"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "serde",
  "serde_ignored",
@@ -1204,7 +1204,7 @@ dependencies = [
 
 [[package]]
 name = "flexflyout-ui"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "egui",
  "egui_kittest",
