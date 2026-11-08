@@ -43,7 +43,7 @@ The images in `Assets/` are rendered from `crates/flexflyout/assets/flexflyout.s
    ```
 
 4. Run the release workflow (or tag a release), and upload `flexflyout-vX.Y.Z-x64.msix` from the `flexflyout-msix` artifact to the submission's **Packages**.
-5. The rest of the submission:
+5. The rest of the submission (the values and the listing texts in English and Japanese are in [`store-listing.md`](store-listing.md)):
    - **Pricing**: free. **Properties**: category (Utilities & tools), privacy policy URL `https://github.com/akivajp/flexflyout#privacy`.
    - **Age ratings**: the questionnaire (no user content, no purchases).
    - **Store listings** in English and Japanese: description, screenshots (`docs/images/`), and the features.

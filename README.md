@@ -104,6 +104,8 @@ Network access:
 - **The update check**: once a day, FlexFlyout asks GitHub (`api.github.com`) for the latest release, and says so in the tray menu and with a notification when a newer one is out. Nothing is downloaded or installed, and nothing about you is sent besides what any web request shows (your IP address and the app's version). Turn it off with `check_updates = false`, or "Check for new versions" in the settings window.
 - **Cover art** (Linux): when a player gives its cover art as a web address (Spotify does), FlexFlyout downloads that image from that address.
 
+Installed from the Microsoft Store, FlexFlyout does not check for updates (the Store brings them), so on Windows it makes no network connections at all.
+
 ## License
 
 Licensed under either of
