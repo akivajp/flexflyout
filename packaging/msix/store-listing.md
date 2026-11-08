@@ -39,14 +39,16 @@ Upload `flexflyout-vX.Y.Z-x64.msix` from the release workflow's `flexflyout-msix
 
 ## Store listings
 
-Add the listings for **English (United States)** and **Japanese**. Screenshots: PNG, at least 1366×768 (up to 3840×2160), up to 10; the same set fits both languages if the app's language matches (take them with `flexflyout --demo --lang en` and `--lang ja`, which show sample tracks, not real cover art).
+Add the listings for **English (United States)** and **Japanese**, each with its own screenshots (PNG, 1366×768 or larger, up to 3840×2160).
 
-Suggested screenshots and captions:
+The screenshots were taken from the MSIX package (so the settings window has no update option, as in the Store version) in the shared Windows 11 VM, with made-up tracks and cover art played in Edge (its name reads "Microsoft Edge" in any language) and our own wallpaper; cropped to 16:9 without the evaluation watermark and the taskbar, and scaled to 1366×768. The files are kept locally (`tmp/store-shots/`, not committed), in this order:
 
-1. The flyout at the top right of a desktop — "What's playing, with controls and the volume, when you change the volume" / 「音量を変えると、再生中の曲を操作ボタンと音量と一緒に表示」
-2. The settings window with the flyout as a preview — "Choose the monitor, the place, the size, the display time and the look" / 「表示するモニター・位置・大きさ・表示時間・見た目を自由に」
-3. The small panel for a new track — "A small panel for a new track; click it for the whole flyout" / 「新しい曲は小さな表示で。クリックで全体を表示」
-4. The light look, or the flyout on a second monitor — "Light or dark, following Windows if you like" / 「明るい色・暗い色。Windows に合わせることも」
+| # | English | Japanese | Caption (English / Japanese) |
+| --- | --- | --- | --- |
+| 1 | `en-1-flyout.png` | `ja-1-flyout.png` | What's playing, with controls and the volume, when you change the volume / 音量を変えると、再生中の曲を操作ボタンと音量と一緒に表示 |
+| 2 | `en-2-settings.png` | `ja-2-settings.png` | Choose the monitor, the place, the size, the display time and the look / 表示するモニター・位置・大きさ・表示時間・見た目を自由に |
+| 3 | `en-3-new-track.png` | `ja-3-new-track.png` | A small panel for a new track; click it for the whole flyout / 新しい曲は小さな表示で。クリックで全体を表示 |
+| 4 | `en-4-light.png` | `ja-4-light.png` | Light or dark, following Windows if you like / 明るい色・暗い色。Windows に合わせることも |
 
 ### English (United States)
 
