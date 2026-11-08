@@ -7,6 +7,8 @@ include breaking changes).
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-11-08
+
 ### Added
 - Choose the player to follow (`general.player`): from the new player
   button on the flyout, which lists "Auto" and the players there are, or
@@ -169,7 +171,8 @@ The first release, for Windows 11.
 - English and Japanese.
 - `flexflyout --demo` shows sample tracks.
 
-[Unreleased]: https://github.com/akivajp/flexflyout/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/akivajp/flexflyout/compare/v0.8.0...HEAD
+[0.8.0]: https://github.com/akivajp/flexflyout/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/akivajp/flexflyout/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/akivajp/flexflyout/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/akivajp/flexflyout/compare/v0.4.0...v0.5.0
