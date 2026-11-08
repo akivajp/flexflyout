@@ -48,6 +48,10 @@ include breaking changes).
   started before the panel or the taskbar was ready (at login, say). On
   Linux it now waits for the panel's tray, and comes back when the panel
   restarts; on Windows adding it is tried again for a while.
+- Windows: a track that a player could not tell yet (Media Player
+  answers "not ready" while it sets up) showed as nothing playing, and
+  the same track then came up again as a new one. It is now read again a
+  moment later, and the flyout keeps what it showed meanwhile.
 - Linux: after the sound server restarted (PipeWire does after an update,
   or when restarted to fix a Bluetooth device), or when it was not up yet
   at login, the flyout no longer followed the volume. FlexFlyout now

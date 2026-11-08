@@ -31,6 +31,12 @@ use windows::Win32::System::Com::{COINIT_MULTITHREADED, CoInitializeEx};
 /// How long to wait for more events after the first one.
 const SETTLE: Duration = Duration::from_millis(120);
 
+/// How long to wait before reading a track again that could not be read
+/// (a player still setting up a new track answers "not ready"), and how
+/// many times to try.
+const RETRY: Duration = Duration::from_millis(500);
+const RETRIES: u32 = 3;
+
 /// Longest side of the cover art kept in memory, in pixels: the panel shows
 /// it at 96 points, so this is enough up to about 3× (scale and display
 /// scaling together).
@@ -136,9 +142,15 @@ fn run(
     }))?;
 
     let mut current = subscribe(&manager, requests);
-    let mut track = read_track(current.as_ref(), None);
+    let mut track = read_track(current.as_ref(), None).unwrap_or_else(|err| {
+        log::warn!("cannot read the track: {err}");
+        retry_later(requests);
+        None
+    });
     log::info!("now playing: {track:?}");
     sink(track.clone(), Change::Other);
+    // Failed reads in a row, for giving up after a few.
+    let mut failed = 0;
 
     loop {
         let Ok(first) = received.recv() else {
@@ -178,6 +190,24 @@ fn run(
             read_track(current.as_ref(), track.as_ref())
         } else {
             continue; // Only commands.
+        };
+        let new = match new {
+            Ok(new) => {
+                failed = 0;
+                new
+            }
+            // What is shown stays (a moment of "nothing playing", and the
+            // same track coming back as a new one, would only flicker).
+            Err(err) => {
+                failed += 1;
+                if failed <= RETRIES {
+                    log::info!("cannot read the track yet ({err}); trying again");
+                    retry_later(requests);
+                } else {
+                    log::warn!("cannot read the track: {err}");
+                }
+                continue;
+            }
         };
         if new == track {
             continue;
@@ -336,10 +366,32 @@ fn duration_from_ticks(ticks: i64) -> Duration {
     Duration::from_nanos(u64::try_from(ticks).unwrap_or(0).saturating_mul(100))
 }
 
-/// Reads the current track. With `known`, only the playback state and the
-/// position are read, and the title, artist and cover art are copied from it.
-fn read_track(current: Option<&Current>, known: Option<&NowPlaying>) -> Option<NowPlaying> {
-    let session = &current?.session;
+/// Asks the media thread to read the track again in a moment.
+fn retry_later(requests: &Sender<Request>) {
+    let requests = requests.clone();
+    let spawned = std::thread::Builder::new()
+        .name("media-retry".into())
+        .spawn(move || {
+            std::thread::sleep(RETRY);
+            let _ = requests.send(Request::PropertiesChanged);
+        });
+    if let Err(err) = spawned {
+        log::warn!("cannot read the track again later: {err}");
+    }
+}
+
+/// Reads the current track (`None`: no player). With `known`, only the
+/// playback state and the position are read, and the title, artist and
+/// cover art are copied from it. Fails when the player cannot tell its
+/// track now.
+fn read_track(
+    current: Option<&Current>,
+    known: Option<&NowPlaying>,
+) -> windows::core::Result<Option<NowPlaying>> {
+    let Some(current) = current else {
+        return Ok(None);
+    };
+    let session = &current.session;
     let Playback {
         status,
         repeat,
@@ -348,24 +400,17 @@ fn read_track(current: Option<&Current>, known: Option<&NowPlaying>) -> Option<N
     } = read_playback(session);
     let timeline = read_timeline(session, seekable);
     if let Some(known) = known {
-        return Some(NowPlaying {
+        return Ok(Some(NowPlaying {
             status,
             timeline,
             repeat,
             shuffle,
             ..known.clone()
-        });
+        }));
     }
-    let properties = match session
+    let properties = session
         .TryGetMediaPropertiesAsync()
-        .and_then(|operation| operation.join())
-    {
-        Ok(properties) => properties,
-        Err(err) => {
-            log::warn!("cannot read the track: {err}");
-            return None;
-        }
-    };
+        .and_then(|operation| operation.join())?;
     let text = |value: windows::core::Result<windows::core::HSTRING>| {
         value.map(|s| s.to_string_lossy()).unwrap_or_default()
     };
@@ -374,7 +419,7 @@ fn read_track(current: Option<&Current>, known: Option<&NowPlaying>) -> Option<N
             .inspect_err(|err| log::warn!("cannot read the cover art: {err:#}"))
             .ok()
     });
-    Some(NowPlaying {
+    Ok(Some(NowPlaying {
         title: text(properties.Title()),
         artist: text(properties.Artist()),
         status,
@@ -382,7 +427,7 @@ fn read_track(current: Option<&Current>, known: Option<&NowPlaying>) -> Option<N
         timeline,
         repeat,
         shuffle,
-    })
+    }))
 }
 
 /// Decodes cover art (any format Windows reads) and scales it down.

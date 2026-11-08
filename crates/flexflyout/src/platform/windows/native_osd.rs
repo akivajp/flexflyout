@@ -25,8 +25,8 @@ use windows::Win32::System::LibraryLoader::{GetModuleHandleW, GetProcAddress};
 use windows::Win32::UI::Accessibility::{HWINEVENTHOOK, SetWinEventHook};
 use windows::Win32::UI::WindowsAndMessaging::{
     CHILDID_SELF, DispatchMessageW, EVENT_OBJECT_SHOW, FindWindowExW, GetClassNameW, GetMessageW,
-    GetShellWindow, GetWindowRect, GetWindowThreadProcessId, IsWindowVisible, MSG, OBJID_WINDOW,
-    SetTimer, TranslateMessage, WINEVENT_OUTOFCONTEXT, WINEVENT_SKIPOWNPROCESS,
+    GetShellWindow, GetWindowRect, GetWindowThreadProcessId, IsWindow, IsWindowVisible, MSG,
+    OBJID_WINDOW, SetTimer, TranslateMessage, WINEVENT_OUTOFCONTEXT, WINEVENT_SKIPOWNPROCESS,
 };
 use windows::core::{BOOL, s, w};
 
@@ -90,11 +90,16 @@ pub fn last_seen() -> Option<PixelRect> {
     *LAST_SEEN.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
-/// Brings back every indicator this process hid (at exit).
+/// Brings back every indicator this process hid (at exit). Windows that
+/// are gone (Explorer restarted meanwhile) are skipped.
 pub fn restore() {
     let hidden = std::mem::take(&mut *HIDDEN.lock().unwrap_or_else(PoisonError::into_inner));
     for raw in hidden {
-        show_again(HWND(raw as *mut _));
+        let hwnd = HWND(raw as *mut _);
+        // SAFETY: a plain query; a stale handle only answers false.
+        if unsafe { IsWindow(Some(hwnd)) }.as_bool() {
+            show_again(hwnd);
+        }
     }
 }
 
