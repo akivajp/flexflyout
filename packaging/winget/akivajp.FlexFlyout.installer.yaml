@@ -1,18 +1,18 @@
 # yaml-language-server: $schema=https://aka.ms/winget-manifest.installer.1.12.0.schema.json
 
 PackageIdentifier: akivajp.FlexFlyout
-PackageVersion: 0.7.0
+PackageVersion: 0.8.0
 InstallerType: zip
 NestedInstallerType: portable
 NestedInstallerFiles:
-- RelativeFilePath: flexflyout-v0.7.0-x86_64-pc-windows-msvc\flexflyout.exe
+- RelativeFilePath: flexflyout-v0.8.0-x86_64-pc-windows-msvc\flexflyout.exe
   PortableCommandAlias: flexflyout
 Commands:
 - flexflyout
 ReleaseDate: 2026-11-08
 Installers:
 - Architecture: x64
-  InstallerUrl: https://github.com/akivajp/flexflyout/releases/download/v0.7.0/flexflyout-v0.7.0-x86_64-pc-windows-msvc.zip
-  InstallerSha256: EA6BE58CBACDA75B6A9DCEE391036DF9684568C2DF83F0A9DC64CF76A79C71F6
+  InstallerUrl: https://github.com/akivajp/flexflyout/releases/download/v0.8.0/flexflyout-v0.8.0-x86_64-pc-windows-msvc.zip
+  InstallerSha256: F0BD40208603A80BE0630747445FE2D0954581A46FA73139B0EBD086A0E21E8C
 ManifestType: installer
 ManifestVersion: 1.12.0
