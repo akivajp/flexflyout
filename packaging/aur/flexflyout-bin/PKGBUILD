@@ -2,7 +2,7 @@
 # The release binary of FlexFlyout for Arch Linux and derivatives (CachyOS,
 # EndeavourOS, Manjaro). Build and install with: makepkg -si
 pkgname=flexflyout-bin
-pkgver=0.8.0
+pkgver=0.9.0
 pkgrel=1
 pkgdesc="Media flyout for KDE Plasma (Wayland): cover art, playback controls and volume, sized and placed where you want"
 arch=('x86_64')
@@ -15,7 +15,7 @@ provides=('flexflyout')
 conflicts=('flexflyout')
 _archive="flexflyout-v${pkgver}-x86_64-unknown-linux-gnu"
 source=("https://github.com/akivajp/flexflyout/releases/download/v${pkgver}/${_archive}.tar.gz")
-sha256sums=('f84f5c6feb3d271edc7e5b162bcf82124cb62fedad30fdfec960c20538b6c5b8')
+sha256sums=('5d21cc95687efb6c063e8ff76360df00a46a2a06ca180585acbfe1f194b5e388')
 
 package() {
     cd "${_archive}"
