@@ -61,6 +61,7 @@ settings-appearance = Appearance
 settings-theme = Colors
 settings-theme-dark = Dark
 settings-theme-light = Light
+settings-theme-system = Same as the system
 settings-accent = Accent color
 settings-accent-default = Default
 settings-corner-radius = Rounded corners

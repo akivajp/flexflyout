@@ -5,7 +5,7 @@
 
 use std::time::{Duration, Instant};
 
-use flexflyout_core::{Command, Config, FlyoutTimer, NowPlaying, PlaybackStatus, Volume};
+use flexflyout_core::{Command, Config, FlyoutTimer, NowPlaying, PlaybackStatus, Theme, Volume};
 use flexflyout_ui::{FlyoutView, Labels};
 
 use crate::message::{Message, Trigger};
@@ -27,6 +27,9 @@ pub struct FlyoutState {
     pub timer: FlyoutTimer,
     /// Whether the user pinned the flyout: it then stays until unpinned.
     pub pinned: bool,
+    /// The system's colors, dark or light, for the theme that follows them
+    /// (dark until the system says otherwise).
+    system_theme: Theme,
     /// When the user last moved the position with the flyout's bar.
     seeked: Option<Instant>,
 }
@@ -60,6 +63,7 @@ impl FlyoutState {
             now_playing: None,
             volume: None,
             pinned: false,
+            system_theme: Theme::Dark,
             seeked: None,
         }
     }
@@ -73,6 +77,10 @@ impl FlyoutState {
             }
             Message::Volume(volume) => {
                 self.volume = Some(volume);
+                Received::Content
+            }
+            Message::SystemTheme(theme) => {
+                self.system_theme = theme;
                 Received::Content
             }
             Message::Show { trigger, sent } => {
@@ -124,6 +132,7 @@ impl FlyoutState {
             now,
             background_opacity: self.config.display.opacity,
             appearance: &self.config.appearance,
+            theme: self.config.appearance.theme.resolved(self.system_theme),
             labels: &self.labels,
         }
     }

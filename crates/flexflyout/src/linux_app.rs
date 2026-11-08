@@ -25,7 +25,7 @@ use crate::platform::linux::keys::{self, Key};
 use crate::platform::linux::layer::{self, Wayland};
 use crate::platform::linux::media::{self, Media};
 use crate::platform::linux::volume::{self, VolumeControl};
-use crate::platform::linux::{desktop, native_osd, tray};
+use crate::platform::linux::{desktop, native_osd, theme, tray};
 
 /// Distance kept from Plasma's volume popup, in logical pixels.
 const NATIVE_OSD_GAP: i32 = 12;
@@ -99,6 +99,11 @@ pub fn run(
         })
         .map_err(|err| anyhow::anyhow!("cannot receive messages: {err}"))?;
     quit_on_signals(sender.clone());
+    // The desktop's color scheme, for the theme that follows it.
+    let to_flyout = sender.clone();
+    theme::spawn(move |theme| {
+        let _ = to_flyout.send(Message::SystemTheme(theme));
+    });
 
     let ctx = egui::Context::default();
     ctx.options_mut(|options| options.zoom_with_keyboard = false);

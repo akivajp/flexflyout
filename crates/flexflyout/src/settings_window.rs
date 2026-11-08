@@ -642,6 +642,11 @@ impl SettingsWindow {
                         Theme::Light,
                         fl!(loader, "settings-theme-light"),
                     );
+                    ui.radio_value(
+                        &mut appearance.theme,
+                        Theme::System,
+                        fl!(loader, "settings-theme-system"),
+                    );
                 });
                 ui.end_row();
 

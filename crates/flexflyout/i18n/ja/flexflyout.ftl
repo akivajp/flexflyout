@@ -61,6 +61,7 @@ settings-appearance = 見た目
 settings-theme = 色
 settings-theme-dark = ダーク
 settings-theme-light = ライト
+settings-theme-system = システムに合わせる
 settings-accent = アクセントの色
 settings-accent-default = 既定の色
 settings-corner-radius = 角の丸み

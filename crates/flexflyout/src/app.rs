@@ -26,7 +26,7 @@ use crate::platform::windows::media::{self, Media};
 use crate::platform::windows::tray::{self, TrayCommand};
 use crate::platform::windows::volume::{self, VolumeControl};
 use crate::platform::windows::window::{self, FlyoutWindow};
-use crate::platform::windows::{autostart, monitor, native_osd};
+use crate::platform::windows::{autostart, monitor, native_osd, theme};
 
 /// Distance kept from the Windows volume indicator, in pixels at 100%.
 const NATIVE_OSD_GAP: f32 = 12.0;
@@ -265,6 +265,9 @@ impl FlyoutApp {
             let placement = placement.clone();
             move |message: Message| send(&sender, &ctx, raw, &placement, message, show_via_egui)
         };
+        // The light or dark mode, for the theme that follows it.
+        let to_window = send.clone();
+        theme::spawn(move |theme| to_window(Message::SystemTheme(theme)));
         // Read by the player's thread, which decides whether to show.
         let show_on_play_pause = Arc::new(AtomicBool::new(config.general.show_on_play_pause));
         let reload = watch_settings(&options, &config, &show_on_play_pause, send.clone());
@@ -468,7 +471,9 @@ fn send(
             placement.moved_to = None;
             true
         }
-        Message::NowPlaying(_) | Message::Volume(_) | Message::Quit => false,
+        Message::NowPlaying(_) | Message::Volume(_) | Message::SystemTheme(_) | Message::Quit => {
+            false
+        }
     };
     if sender.send(message).is_err() {
         return; // The window is closing.

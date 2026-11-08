@@ -3,7 +3,7 @@
 
 use std::time::Instant;
 
-use flexflyout_core::{Config, NowPlaying, Volume};
+use flexflyout_core::{Config, NowPlaying, Theme, Volume};
 use flexflyout_ui::Labels;
 
 /// What the sources send to the window.
@@ -13,6 +13,9 @@ pub enum Message {
     NowPlaying(Option<NowPlaying>),
     /// The volume changed or was read for the first time.
     Volume(Volume),
+    /// The system's colors changed (dark or light), or were read for the
+    /// first time.
+    SystemTheme(Theme),
     /// Show the flyout with what it has.
     Show {
         /// Why.

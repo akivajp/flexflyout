@@ -19,6 +19,10 @@ include breaking changes).
 - Turning the mouse wheel over the volume bar changes the volume, by 2%
   a notch.
 - The tray icon's tooltip shows the track that plays.
+- `appearance.theme = "system"` (or "Same as the system" in the settings
+  window) follows the system's light or dark mode: Windows' mode, or the
+  desktop's color scheme on Linux (through xdg-desktop-portal), also when
+  it changes while FlexFlyout runs.
 - `general.show_over_fullscreen` (on by default, and in the settings
   window): turned off, a volume change, a key or a new track does not
   bring the flyout up over a full-screen game or video on its monitor (it

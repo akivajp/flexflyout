@@ -85,6 +85,9 @@ pub struct FlyoutView<'a> {
     pub background_opacity: f32,
     /// The colors, the corners and the parts to show, from the settings.
     pub appearance: &'a Appearance,
+    /// The colors to draw in, dark or light: the settings' theme, with
+    /// [`Theme::System`] already turned into the system's.
+    pub theme: Theme,
     /// Translated texts.
     pub labels: &'a Labels,
 }
@@ -119,11 +122,13 @@ struct Palette {
 }
 
 impl Palette {
-    fn new(appearance: &Appearance) -> Self {
+    /// The colors of `theme` (dark unless it is light), with the accent
+    /// color of `appearance`.
+    fn new(appearance: &Appearance, theme: Theme) -> Self {
         let (r, g, b) = appearance.accent_rgb();
         let accent = Color32::from_rgb(r, g, b);
-        match appearance.theme {
-            Theme::Dark => Self {
+        match theme {
+            Theme::Dark | Theme::System => Self {
                 background: Color32::from_rgb(28, 28, 34),
                 cover_placeholder: Color32::from_rgb(60, 60, 72),
                 text: Color32::WHITE,
@@ -233,7 +238,7 @@ pub fn draw(ui: &mut Ui, view: &FlyoutView<'_>) -> Option<Command> {
     let painter = ui.painter().clone();
     let labels = view.labels;
     let appearance = view.appearance;
-    let colors = Palette::new(appearance);
+    let colors = Palette::new(appearance, view.theme);
     let mut command = None;
 
     // Rounded background. Its alpha comes from the settings only.
@@ -1044,6 +1049,7 @@ mod tests {
                         now,
                         background_opacity: 0.9,
                         appearance,
+                        theme: appearance.theme.resolved(Theme::Dark),
                         labels,
                     };
                     commands.extend(draw(ui, &view));
@@ -1111,6 +1117,7 @@ mod tests {
                         now: Instant::now(),
                         background_opacity: 0.9,
                         appearance: &DEFAULT,
+                        theme: Theme::Dark,
                         labels: &labels,
                     };
                     commands.extend(draw(ui, &view));

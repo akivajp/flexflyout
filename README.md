@@ -18,7 +18,7 @@ Screen sizes and monitor setups differ from desk to desk, so every part of the f
 - **Position** — nine anchor points plus pixel offsets
 - **Monitor** — the primary one, the one under the cursor, or a specific one
 - **Display time** and **opacity**
-- **Look** — dark or light colors, the accent color, the roundness of the corners, and which parts to show (cover art, position bar, shuffle and repeat, volume) for a smaller flyout
+- **Look** — dark or light colors (or the system's, following its light or dark mode), the accent color, the roundness of the corners, and which parts to show (cover art, position bar, shuffle and repeat, volume) for a smaller flyout
 - **The system's own volume indicator** (Windows, KDE Plasma) — keep it and place the flyout clear of it, or hide it
 - **Full-screen apps** — show the flyout over a full-screen game or video, or keep it off the monitor that has one
 

@@ -75,7 +75,8 @@ fade_out_ms = 400
 animation = "slide"
 
 [appearance]
-# "dark" or "light" colors.
+# "dark" or "light" colors, or "system" to follow the system's light or dark
+# mode (Windows' mode, or the desktop's color scheme on Linux).
 theme = "dark"
 
 # Color of the bars and of the buttons that are on, as "#rrggbb".

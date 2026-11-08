@@ -112,6 +112,21 @@ pub enum Theme {
     Dark,
     /// Dark text on a light panel.
     Light,
+    /// Dark or light as the system is set: Windows' mode, or the desktop's
+    /// color scheme on Linux.
+    System,
+}
+
+impl Theme {
+    /// The colors to draw in: these, or for [`Theme::System`] the system's
+    /// (`system`, dark unless it is light).
+    pub fn resolved(self, system: Theme) -> Theme {
+        match self {
+            Self::System if system == Self::Light => Self::Light,
+            Self::System => Self::Dark,
+            theme => theme,
+        }
+    }
 }
 
 /// Settings that are not about the look.
@@ -776,6 +791,19 @@ mod tests {
         assert_eq!(loaded.config.appearance.corner_radius, MAX_CORNER_RADIUS);
         assert_eq!(loaded.config.appearance.theme, Theme::Light);
         assert_eq!(loaded.warnings.len(), 2, "{:?}", loaded.warnings);
+    }
+
+    #[test]
+    fn the_system_theme_takes_the_system_colors() {
+        assert_eq!(Theme::System.resolved(Theme::Light), Theme::Light);
+        assert_eq!(Theme::System.resolved(Theme::Dark), Theme::Dark);
+        // Nothing known about the system: the default colors.
+        assert_eq!(Theme::System.resolved(Theme::System), Theme::Dark);
+        // A theme of its own ignores the system.
+        assert_eq!(Theme::Dark.resolved(Theme::Light), Theme::Dark);
+        assert_eq!(Theme::Light.resolved(Theme::Dark), Theme::Light);
+        let loaded = Config::parse("[appearance]\ntheme = \"system\"\n").unwrap();
+        assert_eq!(loaded.config.appearance.theme, Theme::System);
     }
 
     #[test]
