@@ -20,7 +20,7 @@ What to enter in Partner Center for FlexFlyout (Apps and games > FlexFlyout > St
 
 ## Age ratings
 
-The questionnaire: category **Utility, Productivity, Communication, or Other**. Answer **No** to everything: no violence, sexual content, language, gambling or drugs; users cannot interact with or share content with each other; no location sharing; no digital purchases; no unrestricted web access. The expected result is the lowest rating everywhere (IARC 3+).
+The questionnaire: app type **All other app types** (its examples include utilities, tools and customization; not "Social or communication"); "ratings from a rating authority or physical media": No. Answer **No** to everything: no violence, sexual content, language, gambling or drugs; users cannot interact with or share content with each other; no location sharing; no digital purchases; no unrestricted web access. The expected result is the lowest rating everywhere (IARC 3+).
 
 ## Packages
 
