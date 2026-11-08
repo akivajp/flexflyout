@@ -3,7 +3,9 @@
 //! A thread of its own owns a hidden top-level window that receives the
 //! icon's clicks. It is top-level rather than message-only so that it gets
 //! the "TaskbarCreated" broadcast, after which the icon must be added again
-//! (Explorer restarted and forgot it).
+//! (Explorer restarted and forgot it). Adding the icon can also fail while
+//! the taskbar is busy (at sign-in, when FlexFlyout starts with Windows):
+//! it is then tried again every few seconds for a while.
 
 use std::path::Path;
 use std::sync::atomic::{AtomicIsize, AtomicU32, Ordering};
@@ -19,12 +21,12 @@ use windows::Win32::UI::Shell::{
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     AppendMenuW, CreateIcon, CreatePopupMenu, CreateWindowExW, DefWindowProcW, DestroyMenu,
-    DispatchMessageW, GetCursorPos, GetMessageW, GetSystemMetrics, HICON, IMAGE_ICON,
+    DispatchMessageW, GetCursorPos, GetMessageW, GetSystemMetrics, HICON, IMAGE_ICON, KillTimer,
     LR_DEFAULTCOLOR, LoadImageW, MF_CHECKED, MF_SEPARATOR, MF_STRING, MSG, PostMessageW,
     RegisterClassW, RegisterWindowMessageW, SM_CXSMICON, SM_CYSMICON, SW_SHOWNORMAL,
-    SetForegroundWindow, TPM_NONOTIFY, TPM_RETURNCMD, TPM_RIGHTBUTTON, TrackPopupMenu,
+    SetForegroundWindow, SetTimer, TPM_NONOTIFY, TPM_RETURNCMD, TPM_RIGHTBUTTON, TrackPopupMenu,
     TranslateMessage, WINDOW_EX_STYLE, WINDOW_STYLE, WM_APP, WM_CONTEXTMENU, WM_LBUTTONUP, WM_NULL,
-    WM_RBUTTONUP, WNDCLASSW,
+    WM_RBUTTONUP, WM_TIMER, WNDCLASSW,
 };
 use windows::core::{HSTRING, PCWSTR, w};
 
@@ -62,6 +64,15 @@ const WM_TRAY: u32 = WM_APP + 1;
 
 /// The icon's ID within our window (there is one).
 const ICON_ID: u32 = 1;
+
+/// The timer that tries again to add the icon, its interval, and how many
+/// times it tries (about two minutes in all).
+const RETRY_TIMER: usize = 1;
+const RETRY_MS: u32 = 3000;
+const RETRIES: u32 = 40;
+
+/// How many times adding the icon has failed since it last worked.
+static FAILED: AtomicU32 = AtomicU32::new(0);
 
 /// State of the tray thread, reachable from the window procedure.
 struct Tray {
@@ -297,7 +308,7 @@ fn run() -> anyhow::Result<()> {
             RegisterWindowMessageW(w!("TaskbarCreated")),
             Ordering::Release,
         );
-        add_icon(hwnd);
+        add_icon_or_retry(hwnd);
 
         let mut message = MSG::default();
         while GetMessageW(&mut message, None, 0, 0).as_bool() {
@@ -308,12 +319,38 @@ fn run() -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Adds the icon to the notification area.
-fn add_icon(hwnd: HWND) {
+/// Adds the icon to the notification area. Returns whether it is there.
+fn add_icon(hwnd: HWND) -> bool {
     let data = icon_data(hwnd);
-    // SAFETY: `data` describes our window and icon.
-    if !unsafe { Shell_NotifyIconW(NIM_ADD, &data) }.as_bool() {
-        log::warn!("cannot add the tray icon");
+    // SAFETY: `data` describes our window and icon. Adding fails when the
+    // icon is there already (an earlier attempt timed out but went
+    // through, say); changing it then works.
+    unsafe {
+        Shell_NotifyIconW(NIM_ADD, &data).as_bool()
+            || Shell_NotifyIconW(NIM_MODIFY, &data).as_bool()
+    }
+}
+
+/// Adds the icon, or starts trying again every few seconds if it cannot be
+/// added now.
+fn add_icon_or_retry(hwnd: HWND) {
+    if add_icon(hwnd) {
+        if FAILED.swap(0, Ordering::AcqRel) > 0 {
+            log::info!("added the tray icon");
+        }
+        // SAFETY: stops our own timer, if it runs.
+        let _ = unsafe { KillTimer(Some(hwnd), RETRY_TIMER) };
+        return;
+    }
+    let failed = FAILED.fetch_add(1, Ordering::AcqRel) + 1;
+    if failed == 1 {
+        log::warn!("cannot add the tray icon; trying again for a while");
+        // SAFETY: a timer of our own window; WM_TIMER comes to its procedure.
+        unsafe { SetTimer(Some(hwnd), RETRY_TIMER, RETRY_MS, None) };
+    } else if failed > RETRIES {
+        log::warn!("cannot add the tray icon; giving up until the taskbar restarts");
+        // SAFETY: stops our own timer.
+        let _ = unsafe { KillTimer(Some(hwnd), RETRY_TIMER) };
     }
 }
 
@@ -349,8 +386,14 @@ unsafe extern "system" fn window_proc(
         }
         return LRESULT(0);
     }
+    if message == WM_TIMER && wparam.0 == RETRY_TIMER {
+        add_icon_or_retry(hwnd);
+        return LRESULT(0);
+    }
     if message != 0 && message == TASKBAR_CREATED.load(Ordering::Acquire) {
-        add_icon(hwnd);
+        // A new taskbar: a fresh start for the attempts.
+        FAILED.store(0, Ordering::Release);
+        add_icon_or_retry(hwnd);
         return LRESULT(0);
     }
     // SAFETY: everything else goes to the default procedure.

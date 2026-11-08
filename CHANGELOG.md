@@ -30,6 +30,10 @@ include breaking changes).
   menu, say) started a second one: two flyouts at every change, two tray
   icons, and an emptied log of the first one. It now opens the settings
   window instead, and leaves the running one alone.
+- The tray icon could be missing for the whole session when FlexFlyout
+  started before the panel or the taskbar was ready (at login, say). On
+  Linux it now waits for the panel's tray, and comes back when the panel
+  restarts; on Windows adding it is tried again for a while.
 - Linux: after the sound server restarted (PipeWire does after an update,
   or when restarted to fix a Bluetooth device), or when it was not up yet
   at login, the flyout no longer followed the volume. FlexFlyout now

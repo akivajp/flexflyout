@@ -1,6 +1,11 @@
 //! The notification area icon (a StatusNotifierItem, which KDE Plasma and
 //! most other desktops show; GNOME needs an extension) and its menu, the
 //! same as on Windows.
+//!
+//! The panel that shows the icon may come up after FlexFlyout (started at
+//! login, before the panel), go away and come back (the panel restarts),
+//! or come only later (an extension turned on): the icon then waits for it
+//! and appears when it does.
 
 use std::sync::{Mutex, OnceLock, PoisonError};
 
@@ -46,12 +51,13 @@ pub fn spawn(labels: TrayLabels, on_command: impl Fn(TrayCommand) + Send + Sync 
         on_command: Box::new(on_command),
         icon: icon(),
     };
-    match tray.spawn() {
+    // Waits for a StatusNotifierWatcher that is not there yet, instead of
+    // giving up on the icon for the whole session.
+    match tray.assume_sni_available(true).spawn() {
         Ok(handle) => {
             let _ = HANDLE.set(handle);
         }
-        // No StatusNotifierWatcher (GNOME without an extension): the
-        // flyout still works, only without the icon.
+        // No session bus: the flyout still works, only without the icon.
         Err(err) => log::warn!("no tray icon: {err}"),
     }
 }
@@ -108,6 +114,17 @@ impl ksni::Tray for Tray {
             description: self.playing.clone().unwrap_or_default(),
             ..Default::default()
         }
+    }
+
+    /// The panel's tray came (back): the icon is registered with it.
+    fn watcher_online(&self) {
+        log::info!("a tray to show the icon in is there now");
+    }
+
+    /// No tray to show the icon in (yet): keeps waiting for one.
+    fn watcher_offline(&self, reason: ksni::OfflineReason) -> bool {
+        log::info!("no tray to show the icon in; waiting for one ({reason:?})");
+        true
     }
 
     /// A left click shows the flyout, as on Windows.
