@@ -495,6 +495,10 @@ impl SettingsWindow {
             fl!(loader, "settings-show-on-play-pause"),
         );
         ui.checkbox(
+            &mut self.config.general.show_over_fullscreen,
+            fl!(loader, "settings-show-over-fullscreen"),
+        );
+        ui.checkbox(
             &mut self.config.general.check_updates,
             fl!(loader, "settings-check-updates"),
         );

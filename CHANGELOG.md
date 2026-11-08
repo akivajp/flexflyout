@@ -19,6 +19,12 @@ include breaking changes).
 - Turning the mouse wheel over the volume bar changes the volume, by 2%
   a notch.
 - The tray icon's tooltip shows the track that plays.
+- `general.show_over_fullscreen` (on by default, and in the settings
+  window): turned off, a volume change, a key or a new track does not
+  bring the flyout up over a full-screen game or video on its monitor (it
+  still shows on the other monitors, and from the tray icon). On Windows
+  it follows Windows' own test for full-screen apps; on Linux the flyout
+  then goes in the layer below full-screen windows.
 
 ### Changed
 - Linux: when FlexFlyout cannot start (on GNOME, which lacks layer-shell,

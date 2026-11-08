@@ -40,6 +40,7 @@ settings-native-osd-keep = Keep it and ignore it
 settings-native-osd-kde = Plasma volume popup
 settings-native-osd-hide-kde = Hide it (the volume popup only)
 settings-show-on-play-pause = Also show when playback starts or pauses
+settings-show-over-fullscreen = Also show over full-screen apps (games, videos)
 settings-check-updates = Check for new versions (asks GitHub once a day)
 settings-start-with-windows = Start with Windows
 settings-start-at-login = Start at login

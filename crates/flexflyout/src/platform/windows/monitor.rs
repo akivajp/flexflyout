@@ -6,10 +6,16 @@
 use flexflyout_core::layout::{MonitorArea, PixelRect};
 use windows::Win32::Foundation::{LPARAM, POINT, RECT};
 use windows::Win32::Graphics::Gdi::{
-    EnumDisplayMonitors, GetMonitorInfoW, HDC, HMONITOR, MONITORINFO,
+    EnumDisplayMonitors, GetMonitorInfoW, HDC, HMONITOR, MONITOR_DEFAULTTONEAREST, MONITORINFO,
+    MonitorFromWindow,
 };
 use windows::Win32::UI::HiDpi::{GetDpiForMonitor, MDT_EFFECTIVE_DPI};
-use windows::Win32::UI::WindowsAndMessaging::{GetCursorPos, MONITORINFOF_PRIMARY};
+use windows::Win32::UI::Shell::{
+    QUNS_BUSY, QUNS_RUNNING_D3D_FULL_SCREEN, SHQueryUserNotificationState,
+};
+use windows::Win32::UI::WindowsAndMessaging::{
+    GetCursorPos, GetForegroundWindow, MONITORINFOF_PRIMARY,
+};
 use windows::core::BOOL;
 
 /// The DPI of a monitor at 100% display scaling.
@@ -66,6 +72,33 @@ unsafe extern "system" fn add_monitor(
         });
     }
     true.into() // Continue with the next monitor.
+}
+
+/// Whether a full-screen app (a game, a video) is in the foreground on the
+/// monitor of `bounds`. Windows itself tells whether one runs (the test
+/// behind its "do not disturb" for full-screen apps); the monitor is the
+/// one the foreground window is on, so that a game on one monitor keeps
+/// the flyout from it, but not from another.
+pub fn fullscreen_app_on(bounds: PixelRect) -> bool {
+    // SAFETY: a plain query.
+    let busy = match unsafe { SHQueryUserNotificationState() } {
+        Ok(state) => state == QUNS_BUSY || state == QUNS_RUNNING_D3D_FULL_SCREEN,
+        Err(_) => false,
+    };
+    if !busy {
+        return false;
+    }
+    let mut info = MONITORINFO {
+        cbSize: size_of::<MONITORINFO>() as u32,
+        ..Default::default()
+    };
+    // SAFETY: plain queries; `info` has its size set, as required.
+    let found = unsafe {
+        let monitor = MonitorFromWindow(GetForegroundWindow(), MONITOR_DEFAULTTONEAREST);
+        GetMonitorInfoW(monitor, &mut info).as_bool()
+    };
+    // Where it is cannot be told: as if on every monitor.
+    !found || pixel_rect(info.rcMonitor) == bounds
 }
 
 /// Where the mouse pointer is, or `None` if Windows does not say (e.g. on

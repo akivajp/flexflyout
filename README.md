@@ -20,6 +20,7 @@ Screen sizes and monitor setups differ from desk to desk, so every part of the f
 - **Display time** and **opacity**
 - **Look** — dark or light colors, the accent color, the roundness of the corners, and which parts to show (cover art, position bar, shuffle and repeat, volume) for a smaller flyout
 - **The system's own volume indicator** (Windows, KDE Plasma) — keep it and place the flyout clear of it, or hide it
+- **Full-screen apps** — show the flyout over a full-screen game or video, or keep it off the monitor that has one
 
 <p align="center"><img src="docs/images/settings-en.png" alt="The settings window, with the flyout showing in the top right corner as a preview of the changes" width="640"></p>
 

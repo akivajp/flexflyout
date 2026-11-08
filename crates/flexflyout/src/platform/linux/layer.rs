@@ -57,6 +57,10 @@ pub struct Placement {
     /// The output (monitor) by its index in the compositor's list, or
     /// `None` to let the compositor choose (KWin: the active one).
     pub output: Option<usize>,
+    /// Whether the flyout goes above full-screen windows (the overlay
+    /// layer), or below them (the top layer, which is still above the
+    /// other windows).
+    pub above_fullscreen: bool,
 }
 
 /// Where the flyout goes for the placement settings, `size` (logical
@@ -115,6 +119,7 @@ pub fn placement(
         anchor: horizontal | vertical,
         margins: (top, right, bottom, left),
         output: None,
+        above_fullscreen: true,
     }
 }
 
@@ -395,8 +400,11 @@ impl Wayland {
         let applied = moved(placement, self.dragged);
         if let Some(shown) = &mut self.shown {
             // An output change needs a new surface (a layer surface's
-            // output is fixed).
-            if shown.placement.output == placement.output {
+            // output is fixed), and so does a layer change, which is rare
+            // enough (the settings changed) not to change it in place.
+            if shown.placement.output == placement.output
+                && shown.placement.above_fullscreen == placement.above_fullscreen
+            {
                 shown.placement = placement;
                 if shown.applied != applied {
                     apply(&shown.layer, &applied);
@@ -412,7 +420,11 @@ impl Wayland {
         let layer = self.layer_shell.create_layer_surface(
             &self.queue,
             surface,
-            Layer::Overlay,
+            if placement.above_fullscreen {
+                Layer::Overlay
+            } else {
+                Layer::Top
+            },
             Some("flexflyout"),
             output.as_ref(),
         );

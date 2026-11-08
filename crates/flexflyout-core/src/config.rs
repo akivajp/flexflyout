@@ -129,6 +129,10 @@ pub struct General {
     /// Whether to ask GitHub once a day for a newer release (and say so in
     /// the tray menu and with a notification).
     pub check_updates: bool,
+    /// Whether the flyout also shows over a full-screen app (a game, a
+    /// video) on its monitor. Without, the volume, the keys and the track
+    /// do not bring it up there.
+    pub show_over_fullscreen: bool,
 }
 
 impl Default for General {
@@ -138,6 +142,7 @@ impl Default for General {
             native_osd: NativeOsd::default(),
             show_on_play_pause: true,
             check_updates: true,
+            show_over_fullscreen: true,
         }
     }
 }

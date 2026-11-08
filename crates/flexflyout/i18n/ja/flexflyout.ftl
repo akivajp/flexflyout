@@ -40,6 +40,7 @@ settings-native-osd-keep = 残して、重なっても気にしない
 settings-native-osd-kde = Plasma の音量表示
 settings-native-osd-hide-kde = 消す（音量の表示だけ）
 settings-show-on-play-pause = 再生・一時停止したときにも表示する
+settings-show-over-fullscreen = 全画面のアプリ（ゲーム・動画）の上にも表示する
 settings-check-updates = 新しい版が出たか確認する（1日1回、GitHub に問い合わせる）
 settings-start-with-windows = Windows の起動時に開始する
 settings-start-at-login = ログイン時に開始する

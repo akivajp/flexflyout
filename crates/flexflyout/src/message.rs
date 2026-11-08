@@ -51,6 +51,24 @@ pub enum Trigger {
     Demo,
 }
 
+impl Trigger {
+    /// Whether the flyout comes up by itself for this (the volume, a key,
+    /// the track), rather than because the user asked for it (the tray
+    /// icon, the demo). Only these keep away from full-screen apps.
+    // The Linux host keeps away from them through the layer it shows in.
+    #[cfg_attr(not(windows), allow(dead_code))]
+    pub fn is_automatic(self) -> bool {
+        match self {
+            Self::VolumeKey
+            | Self::MediaKey
+            | Self::VolumeChange
+            | Self::TrackChange
+            | Self::PlayPause => true,
+            Self::Tray | Self::Demo => false,
+        }
+    }
+}
+
 impl Message {
     /// A [`Message::Show`] sent now.
     pub fn show(trigger: Trigger) -> Self {
@@ -77,4 +95,24 @@ pub enum TrayCommand {
     ToggleAutostart,
     /// End the app.
     Quit,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn only_what_the_user_asked_for_is_not_automatic() {
+        for trigger in [
+            Trigger::VolumeKey,
+            Trigger::MediaKey,
+            Trigger::VolumeChange,
+            Trigger::TrackChange,
+            Trigger::PlayPause,
+        ] {
+            assert!(trigger.is_automatic(), "{trigger:?}");
+        }
+        assert!(!Trigger::Tray.is_automatic());
+        assert!(!Trigger::Demo.is_automatic());
+    }
 }

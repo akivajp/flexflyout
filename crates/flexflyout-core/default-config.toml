@@ -28,6 +28,12 @@ show_on_play_pause = true
 # installed, and nothing about you is sent.
 check_updates = true
 
+# Also show the flyout over a full-screen app (a game or a video) on the
+# monitor it shows on. With false, a volume change, a key or a new track
+# does not bring it up over one (it still shows on other monitors, and
+# from the tray icon).
+show_over_fullscreen = true
+
 [display]
 # Monitor to show the flyout on: "primary", "cursor" (the one the mouse
 # pointer is on) or a number from 1. A missing number means the primary one.

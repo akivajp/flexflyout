@@ -99,6 +99,8 @@ struct Placement {
     native_osd: NativeOsd,
     /// How the flyout comes and goes.
     animation: Animation,
+    /// Whether the flyout comes up by itself over a full-screen app.
+    show_over_fullscreen: bool,
     /// Size of the panel at scale 1.0 (it depends on the parts shown).
     size: egui::Vec2,
     /// Where the window was placed last (where it rests, when sliding).
@@ -118,6 +120,7 @@ impl SharedPlacement {
             display: config.display.clone(),
             native_osd: config.general.native_osd,
             animation: config.timing.animation,
+            show_over_fullscreen: config.general.show_over_fullscreen,
             size: panel_size(&config.appearance),
             rect: None,
             moved_to: None,
@@ -127,6 +130,18 @@ impl SharedPlacement {
     fn lock(&self) -> MutexGuard<'_, Placement> {
         // The data stays consistent even if a thread panicked holding it.
         self.0.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// Whether a full-screen app on the monitor the flyout would show on
+    /// keeps it from coming up by itself (the setting says so).
+    fn kept_away_by_fullscreen(&self) -> bool {
+        let placement = self.lock();
+        if placement.show_over_fullscreen {
+            return false;
+        }
+        let monitors = monitor::list();
+        layout::choose_monitor(&monitors, placement.display.monitor, monitor::cursor())
+            .is_some_and(|i| monitor::fullscreen_app_on(monitors[i].bounds))
     }
 
     /// Chooses the monitor and the rectangle for the next appearance (the
@@ -429,12 +444,24 @@ fn send(
     show_via_egui: bool,
 ) {
     let show = match &message {
-        Message::Show { .. } => true,
+        Message::Show { trigger, .. } => {
+            // Not over a full-screen game or video, unless the user asked
+            // for it, or it shows already (pinned, say).
+            if trigger.is_automatic()
+                && !window::is_visible(raw)
+                && placement.kept_away_by_fullscreen()
+            {
+                log::info!("{trigger:?}: not shown over the full-screen app");
+                return;
+            }
+            true
+        }
         Message::Settings { config, .. } => {
             let mut placement = placement.lock();
             placement.display = config.display.clone();
             placement.native_osd = config.general.native_osd;
             placement.animation = config.timing.animation;
+            placement.show_over_fullscreen = config.general.show_over_fullscreen;
             placement.size = panel_size(&config.appearance);
             // New settings place the flyout anew (a remembered drag comes
             // back here as new settings too).

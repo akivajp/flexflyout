@@ -239,6 +239,9 @@ impl Host {
         let area = self.wayland.output_size(output);
         let mut placement = layer::placement(display, size, slide, area);
         placement.output = output;
+        // Below full-screen windows, the compositor keeps it out of their
+        // way (it still shows on other outputs, as on Windows).
+        placement.above_fullscreen = self.state.config.general.show_over_fullscreen;
         // Clear of Plasma's volume popup: moved as the resting place would
         // have to move.
         if self.state.config.general.native_osd == NativeOsd::Avoid
