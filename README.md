@@ -10,7 +10,7 @@
 
 A flexible, cross-platform media flyout. When you change the volume or press a media key, it pops up with what is playing — cover art, title and artist — along with the position in the track, playback controls (including shuffle and repeat) and the volume, then fades away. A new track shows a small panel with just its cover art, title and artist; click it for the whole flyout. Click or drag the bars to seek or set the volume, or turn the mouse wheel over the volume bar. Pin the flyout to keep it on screen — and drag it wherever you like, optionally as its new usual place — or close it at once.
 
-<p align="center"><img src="docs/images/flyout-en.png" alt="The flyout: cover art, the title and artist, the position in the track, shuffle, previous, pause, next and repeat buttons, and the volume at 64%" width="448"></p>
+<p align="center"><img src="docs/images/demo-en.gif" alt="The flyout in action: it slides in as the volume goes up, the mouse wheel over the volume bar raises it further, the player button lists Auto, mpv and Radio and mpv is chosen; then a new track shows the small panel, and a click on it opens the whole flyout" width="460"></p>
 
 Screen sizes and monitor setups differ from desk to desk, so every part of the flyout is meant to be adjustable:
 
@@ -26,7 +26,7 @@ Screen sizes and monitor setups differ from desk to desk, so every part of the f
 
 <p align="center"><img src="docs/images/settings-en.png" alt="The settings window, with the flyout showing in the top right corner as a preview of the changes" width="640"></p>
 
-<sub>Screenshots taken on Linux with a sample track; the flyout looks the same on Windows 11.</sub>
+<sub>Screenshots and the animation taken on Linux with sample tracks; the flyout looks the same on Windows 11.</sub>
 
 ## Platforms
 
