@@ -39,7 +39,9 @@
 
 ## インストール（Windows 11）
 
-[Scoop](https://scoop.sh) で [akivajp のバケット](https://github.com/akivajp/scoop-bucket) から入れると、スタートメニューにも追加されます（`scoop update flexflyout` で更新できます。先にタスクトレイのアイコンから FlexFlyout を終了してください）。
+[Microsoft Store](https://apps.microsoft.com/detail/9p6kdqx7jzs4) から入れられます。署名済みで SmartScreen の警告が出ず、更新も Store が届けます。Store から入れた場合、設定とログは専用のフォルダー（`%LOCALAPPDATA%\Packages\C2B504BA.FlexFlyout_1raghr5p0ryyw\LocalState`）に置かれ、アンインストールすると消えます。
+
+または、[Scoop](https://scoop.sh) で [akivajp のバケット](https://github.com/akivajp/scoop-bucket) から入れると、スタートメニューにも追加されます（`scoop update flexflyout` で更新できます。先にタスクトレイのアイコンから FlexFlyout を終了してください）。
 
 ```powershell
 scoop bucket add akivajp https://github.com/akivajp/scoop-bucket
@@ -50,12 +52,12 @@ scoop install akivajp/flexflyout
 
 または、[Releases](https://github.com/akivajp/flexflyout/releases) のページから `flexflyout-<版>-x86_64-pc-windows-msvc.zip` を取り、好きな場所に展開して `flexflyout.exe` を起動します（チェックサムは `SHA256SUMS`）。まだコード署名をしていないため、初回に Windows SmartScreen の警告が出ることがあります。**詳細情報** → **実行** を選んでください。
 
-FlexFlyout は通知領域（タスクトレイ）で動き、アイコンにマウスを乗せると再生中の曲が出ます。メニューから、Flyout の表示・設定ウィンドウ・**Windows の起動時に開始**の切り替え・終了ができます。動いているときにもう一度起動すると、設定ウィンドウが開きます。設定は `%APPDATA%\flexflyout\config.toml` に保存され、手で書き換えることもできます（保存して1秒以内に反映）。`flexflyout --help` でコマンドラインのオプションを、`flexflyout --demo` で見本の曲を表示できます。
+FlexFlyout は通知領域（タスクトレイ）で動き、アイコンにマウスを乗せると再生中の曲が出ます。メニューから、Flyout の表示・設定ウィンドウ・**Windows の起動時に開始**の切り替え・終了ができます。起動すると Flyout を一度表示し、初めての起動では設定ウィンドウも開きます。動いているときにもう一度起動すると、設定ウィンドウが開きます。設定は `%APPDATA%\flexflyout\config.toml` に保存され、手で書き換えることもできます（保存して1秒以内に反映）。`flexflyout --help` でコマンドラインのオプションを、`flexflyout --demo` で見本の曲を表示できます。
 
 ### アンインストール
 
 1. タスクトレイのメニューで **Windows の起動時に開始** を外し、FlexFlyout を終了します（Scoop の場合は自動で外れます）。
-2. `scoop uninstall flexflyout` を実行するか、zip を展開したフォルダーを消します。
+2. Store から入れた場合はほかのアプリと同じようにアンインストールし、Scoop の場合は `scoop uninstall flexflyout` を実行し、zip の場合は展開したフォルダーを消します。
 3. 必要なら、設定とログも消します: `%APPDATA%\flexflyout` と `%LOCALAPPDATA%\flexflyout`。
 
 Windows 標準の音量表示を消す設定にしていた場合も、FlexFlyout を終了すれば元に戻ります。

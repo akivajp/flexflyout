@@ -39,7 +39,9 @@ Screen sizes and monitor setups differ from desk to desk, so every part of the f
 
 ## Installation (Windows 11)
 
-With [Scoop](https://scoop.sh), from the [akivajp bucket](https://github.com/akivajp/scoop-bucket), which also adds FlexFlyout to the Start menu (`scoop update flexflyout` updates it; quit FlexFlyout from its tray icon first):
+From the [Microsoft Store](https://apps.microsoft.com/detail/9p6kdqx7jzs4): signed, no SmartScreen warning, and the Store keeps it up to date. Installed from the Store, FlexFlyout keeps its settings and log in its own folder (`%LOCALAPPDATA%\Packages\C2B504BA.FlexFlyout_1raghr5p0ryyw\LocalState`), which uninstalling removes.
+
+Or with [Scoop](https://scoop.sh), from the [akivajp bucket](https://github.com/akivajp/scoop-bucket), which also adds FlexFlyout to the Start menu (`scoop update flexflyout` updates it; quit FlexFlyout from its tray icon first):
 
 ```powershell
 scoop bucket add akivajp https://github.com/akivajp/scoop-bucket
@@ -50,12 +52,12 @@ If you installed it from the manifest URL before, switch to the bucket as its RE
 
 Or download `flexflyout-<version>-x86_64-pc-windows-msvc.zip` from the [Releases](https://github.com/akivajp/flexflyout/releases) page, extract it anywhere and run `flexflyout.exe` (`SHA256SUMS` lists the checksum). The release is not code-signed yet, so Windows SmartScreen may warn the first time: choose **More info** → **Run anyway**.
 
-FlexFlyout runs in the notification area (the tray); its icon's tooltip shows the track that plays. Its menu shows the flyout, opens the settings window, turns **Start with Windows** on or off, and quits. Starting FlexFlyout again while it runs opens the settings window. The settings are saved in `%APPDATA%\flexflyout\config.toml`, which can also be edited by hand (it is applied within a second of saving). `flexflyout --help` lists the command-line options; `flexflyout --demo` shows sample tracks.
+FlexFlyout runs in the notification area (the tray); its icon's tooltip shows the track that plays. Its menu shows the flyout, opens the settings window, turns **Start with Windows** on or off, and quits. Starting FlexFlyout shows the flyout once, and the very first start opens the settings window too; starting it again while it runs opens the settings window. The settings are saved in `%APPDATA%\flexflyout\config.toml`, which can also be edited by hand (it is applied within a second of saving). `flexflyout --help` lists the command-line options; `flexflyout --demo` shows sample tracks.
 
 ### Uninstall
 
 1. Turn **Start with Windows** off in the tray menu and quit FlexFlyout (Scoop turns it off for you).
-2. Remove it: `scoop uninstall flexflyout`, or delete the folder you extracted the zip to.
+2. Remove it: uninstall it like any app from the Store, `scoop uninstall flexflyout`, or delete the folder you extracted the zip to.
 3. Delete the settings and the log, if you like: `%APPDATA%\flexflyout` and `%LOCALAPPDATA%\flexflyout`.
 
 If you hid the Windows volume indicator, it comes back when FlexFlyout quits.

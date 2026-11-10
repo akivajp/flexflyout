@@ -8,8 +8,9 @@ include breaking changes).
 ## [Unreleased]
 
 ### Added
-- An MSIX package for the Microsoft Store, built by the release workflow
-  (not on the Store yet; see `packaging/msix/README.md`). Installed from
+- FlexFlyout is on the Microsoft Store
+  (https://apps.microsoft.com/detail/9p6kdqx7jzs4), from an MSIX package
+  that the release workflow builds (`packaging/msix/`). Installed from
   it, FlexFlyout keeps its settings and logs in the package's folder,
   starts with Windows through the package's startup task, and leaves new
   versions to the Store.
