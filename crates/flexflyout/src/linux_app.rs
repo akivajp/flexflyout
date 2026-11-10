@@ -44,6 +44,9 @@ pub struct Options {
     /// Show the demo, this many times (0 = endless), instead of following
     /// the system.
     pub demo: Option<u32>,
+    /// The very first start (no settings file yet): opens the settings
+    /// window too when the flyout shows at the start (`crate::greet`).
+    pub first_run: bool,
 }
 
 /// What the flyout's controls act on (not in the demo).
@@ -142,11 +145,19 @@ pub fn run(
             crate::demo::spawn(cycles, send);
             None
         }
-        None => Some(start_sources(
-            send,
-            show_on_play_pause,
-            config.general.player().map(str::to_owned),
-        )),
+        None => {
+            crate::greet(
+                options.first_run,
+                options.config_file.clone(),
+                options.lang.clone(),
+                send.clone(),
+            );
+            Some(start_sources(
+                send,
+                show_on_play_pause,
+                config.general.player().map(str::to_owned),
+            ))
+        }
     };
 
     let mut host = Host {

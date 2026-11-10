@@ -13,6 +13,10 @@ include breaking changes).
   it, FlexFlyout keeps its settings and logs in the package's folder,
   starts with Windows through the package's startup task, and leaves new
   versions to the Store.
+- Starting FlexFlyout shows the flyout once (it lives in the tray, so
+  starting it otherwise seemed to do nothing), also at sign-in; the very
+  first start opens the settings window too. Starting it again while it
+  runs still opens the settings window only.
 
 ## [0.9.0] - 2026-11-09
 

@@ -34,20 +34,29 @@ pub fn default_file() -> PathBuf {
 }
 
 /// Reads the settings at the start, after writing the commented default
-/// file if there is none yet. Falls back to the defaults.
-pub fn load_at_start(path: &Path) -> Config {
-    match Config::write_default_if_missing(path) {
-        Ok(true) => log::info!("wrote the default settings to {}", path.display()),
-        Ok(false) => {}
-        Err(err) => log::warn!(
-            "cannot write the default settings to {}: {err}",
-            path.display()
-        ),
-    }
-    read(path).unwrap_or_else(|| {
+/// file if there is none yet. Falls back to the defaults. Also tells
+/// whether this is the very first start (the default file was written
+/// just now).
+pub fn load_at_start(path: &Path) -> (Config, bool) {
+    let first = match Config::write_default_if_missing(path) {
+        Ok(true) => {
+            log::info!("wrote the default settings to {}", path.display());
+            true
+        }
+        Ok(false) => false,
+        Err(err) => {
+            log::warn!(
+                "cannot write the default settings to {}: {err}",
+                path.display()
+            );
+            false
+        }
+    };
+    let config = read(path).unwrap_or_else(|| {
         log::warn!("using the default settings");
         Config::default()
-    })
+    });
+    (config, first)
 }
 
 /// The language to show the texts in: the command line's, else the

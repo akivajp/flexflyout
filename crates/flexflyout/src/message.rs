@@ -60,6 +60,9 @@ pub enum Trigger {
     Tray,
     /// The demo.
     Demo,
+    /// FlexFlyout started: shown once shortly after, so that whoever started
+    /// it (or signed in) sees that it runs, in the tray.
+    Start,
 }
 
 impl Trigger {
@@ -74,7 +77,8 @@ impl Trigger {
             | Self::MediaKey
             | Self::VolumeChange
             | Self::TrackChange
-            | Self::PlayPause => true,
+            | Self::PlayPause
+            | Self::Start => true,
             Self::Tray | Self::Demo => false,
         }
     }
@@ -121,6 +125,7 @@ mod tests {
             Trigger::VolumeChange,
             Trigger::TrackChange,
             Trigger::PlayPause,
+            Trigger::Start,
         ] {
             assert!(trigger.is_automatic(), "{trigger:?}");
         }

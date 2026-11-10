@@ -135,7 +135,7 @@ fn run(cli: Cli) -> anyhow::Result<()> {
     }
 
     let config_file = cli.config.clone().unwrap_or_else(settings::default_file);
-    let config = settings::load_at_start(&config_file);
+    let (config, first_run) = settings::load_at_start(&config_file);
     let loader = i18n::load(settings::language(cli.lang.as_deref(), &config).as_deref())?;
     let labels = i18n::labels(&loader);
 
@@ -156,6 +156,7 @@ fn run(cli: Cli) -> anyhow::Result<()> {
                 lang: cli.lang,
                 demo: cli.demo.then_some(cli.cycles),
                 show_via_egui: cli.show_via_egui,
+                first_run,
             },
         )
     }
@@ -169,13 +170,46 @@ fn run(cli: Cli) -> anyhow::Result<()> {
                 config_file,
                 lang: cli.lang,
                 demo: cli.demo.then_some(cli.cycles),
+                first_run,
             },
         )
     }
     #[cfg(not(any(windows, target_os = "linux")))]
     {
-        let _ = (labels, config, config_file);
+        let _ = (labels, config, config_file, first_run);
         anyhow::bail!("FlexFlyout runs only on Windows and Linux for now")
+    }
+}
+
+/// How long after the start the flyout shows once (`greet`): the sources
+/// (the track, the volume) have their first values by then.
+#[cfg(any(windows, target_os = "linux"))]
+const GREETING_DELAY: std::time::Duration = std::time::Duration::from_millis(1500);
+
+/// FlexFlyout lives in the tray, so that someone who starts it might think
+/// nothing happened: shows the flyout once shortly after the start (also
+/// at sign-in, which says that it runs), and on the very first start (no
+/// settings file yet) opens the settings window too. Started again while
+/// it runs, it opens the settings window only (`hand_over`).
+#[cfg(any(windows, target_os = "linux"))]
+pub(crate) fn greet(
+    first_run: bool,
+    config_file: PathBuf,
+    lang: Option<String>,
+    send: impl Fn(message::Message) + Send + 'static,
+) {
+    let spawned = std::thread::Builder::new()
+        .name("greeting".into())
+        .spawn(move || {
+            std::thread::sleep(GREETING_DELAY);
+            send(message::Message::show(message::Trigger::Start));
+            if first_run {
+                log::info!("the first start: opening the settings window");
+                settings_window::open(&config_file, lang.as_deref());
+            }
+        });
+    if let Err(err) = spawned {
+        log::error!("cannot show the flyout at the start: {err}");
     }
 }
 
