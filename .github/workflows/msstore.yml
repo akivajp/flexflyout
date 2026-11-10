@@ -8,9 +8,9 @@ on:
   workflow_dispatch:
     inputs:
       command:
-        description: "check / show: read (changes nothing); submit: a new submission with the listing files (no package); discard: delete the pending one"
+        description: "check / show: read (changes nothing); submit: a new submission with the listing files (no package); commit: submit the draft; discard: delete the pending one"
         type: choice
-        options: [check, show, submit, discard]
+        options: [check, show, submit, commit, discard]
         default: check
       images:
         description: "submit: also replace the screenshots"

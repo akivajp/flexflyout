@@ -48,7 +48,7 @@ Partner Center（日本語の画面）で FlexFlyout を申請するときに入
 
 英語（米国）と日本語の 2 つを追加し、それぞれにその言語のスクリーンショットを入れる（PNG、1366×768 以上、3840×2160 まで）。
 
-スクリーンショットは手元の `tmp/store-shots/`（コミットしない）にある。共有の Windows 11 の仮想マシンで、試験用の MSIX（Store 版と同じく、設定ウィンドウに新しい版の確認の項目が無い）を入れて撮った。曲は架空の曲と自作のジャケットを Edge で流し（プレーヤーの名前がどの言語でも「Microsoft Edge」になる）、壁紙も自作。評価版の透かしとタスクバーを外して 16:9 に切り抜き、1366×768 に拡大した。番号の順に登録する。
+スクリーンショットは `packaging/msix/store/screenshots/` にある。共有の Windows 11 の仮想マシンで、試験用の MSIX（Store 版と同じく、設定ウィンドウに新しい版の確認の項目が無い）を入れて撮った。曲は架空の曲と自作のジャケットを Edge で流し（プレーヤーの名前がどの言語でも「Microsoft Edge」になる）、壁紙も自作。評価版の透かしとタスクバーを外して 16:9 に切り抜き、1366×768 に拡大した。番号の順に登録する。
 
 | 順 | 英語 | 日本語 |
 | --- | --- | --- |
@@ -57,7 +57,7 @@ Partner Center（日本語の画面）で FlexFlyout を申請するときに入
 | 3 | `en-3-new-track.png` | `ja-3-new-track.png` |
 | 4 | `en-4-light.png` | `ja-4-light.png` |
 
-キャプション（「イメージの字幕の追加」、200 文字まで）は、各言語の掲載情報の節にある。
+キャプション（「イメージの字幕の追加」、200 文字まで）は、各言語の TOML ファイルにある。
 
 Microsoft Store ロゴ（任意）:
 
@@ -65,150 +65,11 @@ Microsoft Store ロゴ（任意）:
 - **9:16 のポスター アート**: 必要なのは Xbox だけ。入れるなら `tmp/store-shots/store-poster-1440x2160.png`
 - **タイル アイコン（300 / 150 / 71）**: 空のまま（パッケージのアイコンが使われる）
 
-### English (United States)
+### 掲載情報の文とスクリーンショット
 
-**Product name**: FlexFlyout
+英語（米国）・日本語の掲載情報（製品名・短い説明・説明・このバージョンの新機能・製品の機能・検索用語・著作権・追加のライセンス条項・開発元・スクリーンショットとキャプション）は、`packaging/msix/store/en-us.toml`・`ja-jp.toml` が正本。
 
-**Short description**:
-
-> A media flyout for Windows 11: the playing track, playback controls and the volume when you change the volume, on the monitor, at the place and in the size you choose.
-
-**Description**:
-
-> FlexFlyout shows what's playing when you change the volume or press a media key: the cover art, the title and artist, a seek bar, the playback controls and the volume, in a flyout that fades away after a few seconds. When a new track starts, a small panel shows it; click it for the whole flyout.
->
-> Monitors differ from desk to desk, so everything about the flyout can be adjusted:
-> • Which monitor: the primary one, the one with the mouse pointer, or a specific one
-> • Where: nine anchor points, plus offsets in pixels
-> • How big, how long and how transparent
-> • Light or dark (or following Windows), the accent color, the corner roundness, and which parts to show
->
-> It works with the apps that show up in Windows' media controls, such as Spotify, web browsers and Media Player.
->
-> Also:
-> • Keep Windows' own volume indicator, with the flyout placed clear of it, or hide it
-> • Follow one player only, so that a video in the browser does not take over
-> • Stay off the monitor where a full-screen game is running
-> • Seek, shuffle, repeat and mute; drag the volume bar, or scroll over it
-> • Pin the flyout to keep it on screen, and drag it anywhere
-> • English and Japanese
->
-> FlexFlyout lives in the notification area, and its settings window shows each change on the flyout as you make it. It collects no data, and installed from the Microsoft Store it makes no network connections.
->
-> FlexFlyout is free and open source (MIT or Apache 2.0): https://github.com/akivajp/flexflyout
-
-**Screenshot captions** (in the order of the screenshots):
-
-- What's playing, with controls and the volume, when you change the volume
-- Choose the monitor, the place, the size, the display time and the look
-- A small panel for a new track; click it for the whole flyout
-- Light or dark, following Windows if you like
-
-**What's new in this version**: First release on the Microsoft Store.
-
-**Product features** (one per line):
-
-- Shows the playing track, playback controls and the volume when you change the volume or press a media key
-- A small panel for each new track
-- Choose the monitor: primary, under the mouse pointer, or a specific one
-- Nine anchor points plus pixel offsets
-- Adjustable size, display time and opacity
-- Light or dark (or following Windows), accent color, corner roundness
-- Keep Windows' volume indicator (placed clear of it) or hide it
-- Follow one player only
-- Stays off full-screen games on that monitor
-- Seek bar, shuffle, repeat, mute, volume by dragging or scrolling
-- Pin and drag the flyout
-- Starts with Windows if you like
-- English and Japanese
-- Free and open source
-
-**Search terms** (7 at most, one per box):
-
-- volume flyout
-- media flyout
-- now playing
-- volume indicator
-- media controls
-- music
-- OSD
-
-**Copyright and trademark info**: Copyright (c) 2026 Akiva Miura
-
-**Additional license terms**: MIT License or Apache License 2.0, at your option: https://github.com/akivajp/flexflyout#license
-
-**Developed by**: Akiva Miura
-
-### Japanese
-
-**製品名**: FlexFlyout
-
-**短い説明**:
-
-> Windows 11 用のメディアの Flyout。音量を変えると、再生中の曲を操作ボタンと音量と一緒に、選んだモニター・位置・大きさで表示します。
-
-**説明**:
-
-> FlexFlyout は、音量を変えたときやメディアキーを押したときに、再生中の曲のジャケット・曲名・アーティストを、再生位置のバー・再生の操作ボタン・音量と一緒に表示し、数秒で消える Flyout です。新しい曲が始まると小さな表示でお知らせし、クリックすると全体を表示します。
->
-> モニターの数や大きさは人それぞれなので、表示のすべてを調整できます。
-> • 表示するモニター: メインのモニター、マウスのある画面、番号で指定
-> • 位置: 9 か所の基準点と、ピクセル単位のずらし幅
-> • 大きさ・表示時間・不透明度
-> • 明るい色・暗い色（Windows に合わせることも）、アクセントの色、角の丸み、表示する部品
->
-> Spotify、Web ブラウザー、メディア プレーヤーなど、Windows のメディアの操作に表示されるアプリに対応しています。
->
-> そのほかにも:
-> • Windows 標準の音量表示は、残して重ならない位置に出すか、消すかを選べます
-> • 追いかけるプレーヤーを 1 つに決められます（ブラウザーで動画を見ても切り替わりません）
-> • 全画面のゲームを動かしているモニターには表示しない設定
-> • 再生位置の移動、シャッフル、リピート、ミュート。音量バーはドラッグやマウスのホイールでも
-> • ピン留めすると表示したままになり、好きな場所へドラッグできます
-> • 英語と日本語に対応
->
-> FlexFlyout は通知領域で動き、設定ウィンドウで変えた内容はその場で Flyout に表示されます。データを集めることはなく、Microsoft Store から入れた場合はネットワークにも接続しません。
->
-> FlexFlyout は無料のオープンソースです（MIT または Apache 2.0）: https://github.com/akivajp/flexflyout
-
-**スクリーンショットのキャプション**（スクリーンショットの順に）:
-
-- 音量を変えると、再生中の曲を操作ボタンと音量と一緒に表示
-- 表示するモニター・位置・大きさ・表示時間・見た目を自由に
-- 新しい曲は小さな表示で。クリックで全体を表示
-- 明るい色・暗い色。Windows に合わせることも
-
-**このバージョンの新機能**: Microsoft Store での最初の公開です。
-
-**製品の機能**（1 行に 1 つ）:
-
-- 音量を変えたときやメディアキーで、再生中の曲を操作ボタンと音量と一緒に表示
-- 新しい曲は小さな表示でお知らせ
-- 表示するモニターを選べる（メイン・マウスのある画面・番号）
-- 9 か所の基準点とピクセル単位のずらし幅
-- 大きさ・表示時間・不透明度を調整
-- 明るい色・暗い色（Windows に合わせることも）、アクセントの色、角の丸み
-- Windows 標準の音量表示を避けて表示、または消す
-- 追いかけるプレーヤーを 1 つに決められる
-- 全画面のゲームのモニターには表示しない設定
-- 再生位置のバー、シャッフル、リピート、ミュート、音量はドラッグやホイールでも
-- ピン留めとドラッグでの移動
-- Windows の起動時に開始
-- 英語と日本語に対応
-- 無料のオープンソース
-
-**検索用語**（7 つまで、1 つの欄に 1 つ）:
-
-- 音量
-- フライアウト
-- 再生中の曲
-- メディア
-- 音楽
-- OSD
-- volume flyout
-
-**著作権と商標の情報**: Copyright (c) 2026 Akiva Miura
-
-**追加のライセンス条項**: MIT License または Apache License 2.0 のいずれかを選択できます: https://github.com/akivajp/flexflyout#license
-
-**開発元**: Akiva Miura
+- Store へは Microsoft Store のワークフローで反映するので、画面に貼らなくてよい。タグを打つとリリースのワークフローが、その版の MSIX と掲載情報で**下書き**の申請を作る。Partner Center で中身を見て提出するか、Microsoft Store のワークフロー（手動の実行）の `commit` で提出する。
+- **リリースのたびに `release_notes`（このバージョンの新機能）を、英語・日本語とも書き換えてからタグを打つ**。
+- スクリーンショットを差し替えたときは、Microsoft Store のワークフローを `submit`・`images` を付けて動かす（タグのリリースでは差し替えない）。
+- 言語を足すときは、`<言語>.toml`（例: `de-de.toml`）を足す。その言語のスクリーンショットが無ければ `[[screenshots]]` を書かない。
