@@ -131,8 +131,9 @@ jobs:
   # A new Microsoft Store submission with this version's MSIX package and
   # the listing files (packaging/msix/store), through akivajp/msstore-submit
   # (GitHub OIDC; the environment `msstore` is what Entra ID trusts). Left
-  # as a draft, to look at in Partner Center and submit there (or with the
-  # Microsoft Store workflow's commit command). Tags only.
+  # as a draft: its log shows what changes, and the Microsoft Store
+  # workflow's commit command submits it (Partner Center shows the changes
+  # only once committed; don't edit or submit it there). Tags only.
   store:
     name: Microsoft Store submission
     needs: build
