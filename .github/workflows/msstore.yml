@@ -1,0 +1,28 @@
+# Microsoft Store submissions, through the shared workflow in
+# akivajp/msstore-submit (signs in with GitHub OIDC; no secret is stored).
+# The environment `msstore` of this repository is what the Entra ID app's
+# federated credential trusts.
+name: Microsoft Store
+
+on:
+  workflow_dispatch:
+    inputs:
+      command:
+        description: "check: read the app and its submissions (changes nothing)"
+        type: choice
+        options: [check]
+        default: check
+
+permissions:
+  contents: read
+
+jobs:
+  store:
+    permissions:
+      contents: read
+      id-token: write
+    uses: akivajp/msstore-submit/.github/workflows/store.yml@main
+    with:
+      # FlexFlyout's Store ID (Partner Center > Product identity).
+      app-id: 9P6KDQX7JZS4
+      command: ${{ inputs.command }}
