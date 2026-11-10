@@ -8,10 +8,18 @@ on:
   workflow_dispatch:
     inputs:
       command:
-        description: "check: read the app and its submissions (changes nothing)"
+        description: "check / show: read (changes nothing); submit: a new submission with the listing files (no package); discard: delete the pending one"
         type: choice
-        options: [check]
+        options: [check, show, submit, discard]
         default: check
+      images:
+        description: "submit: also replace the screenshots"
+        type: boolean
+        default: false
+      commit:
+        description: "submit: commit it (otherwise it stays a draft in Partner Center)"
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -26,3 +34,6 @@ jobs:
       # FlexFlyout's Store ID (Partner Center > Product identity).
       app-id: 9P6KDQX7JZS4
       command: ${{ inputs.command }}
+      listings: packaging/msix/store
+      images: ${{ inputs.images }}
+      commit: ${{ inputs.commit }}
