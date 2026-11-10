@@ -1,0 +1,78 @@
+# FlexFlyout's Microsoft Store listing in English (United States), applied by the
+# Microsoft Store workflow (.github/workflows/msstore.yml, akivajp/msstore-submit).
+# Fields left out keep the values of the last submission.
+
+title = "FlexFlyout"
+short_description = "A media flyout for Windows 11: the playing track, playback controls and the volume when you change the volume, on the monitor, at the place and in the size you choose."
+description = '''
+FlexFlyout shows what's playing when you change the volume or press a media key: the cover art, the title and artist, a seek bar, the playback controls and the volume, in a flyout that fades away after a few seconds. When a new track starts, a small panel shows it; click it for the whole flyout.
+
+Monitors differ from desk to desk, so everything about the flyout can be adjusted:
+• Which monitor: the primary one, the one with the mouse pointer, or a specific one
+• Where: nine anchor points, plus offsets in pixels
+• How big, how long and how transparent
+• Light or dark (or following Windows), the accent color, the corner roundness, and which parts to show
+
+It works with the apps that show up in Windows' media controls, such as Spotify, web browsers and Media Player.
+
+Also:
+• Keep Windows' own volume indicator, with the flyout placed clear of it, or hide it
+• Follow one player only, so that a video in the browser does not take over
+• Stay off the monitor where a full-screen game is running
+• Seek, shuffle, repeat and mute; drag the volume bar, or scroll over it
+• Pin the flyout to keep it on screen, and drag it anywhere
+• English and Japanese
+
+FlexFlyout lives in the notification area, and its settings window shows each change on the flyout as you make it. It collects no data, and installed from the Microsoft Store it makes no network connections.
+
+FlexFlyout is free and open source (MIT or Apache 2.0): https://github.com/akivajp/flexflyout'''
+# "What's new in this version": rewrite for each release.
+release_notes = "Starting FlexFlyout now shows the flyout once, so you can see it runs; the first start also opens the settings window."
+features = [
+  "Shows the playing track, playback controls and the volume when you change the volume or press a media key",
+  "A small panel for each new track",
+  "Choose the monitor: primary, under the mouse pointer, or a specific one",
+  "Nine anchor points plus pixel offsets",
+  "Adjustable size, display time and opacity",
+  "Light or dark (or following Windows), accent color, corner roundness",
+  "Keep Windows' volume indicator (placed clear of it) or hide it",
+  "Follow one player only",
+  "Stays off full-screen games on that monitor",
+  "Seek bar, shuffle, repeat, mute, volume by dragging or scrolling",
+  "Pin and drag the flyout",
+  "Starts with Windows if you like",
+  "English and Japanese",
+  "Free and open source",
+]
+# Search terms, 7 at most.
+keywords = [
+  "volume flyout",
+  "media flyout",
+  "now playing",
+  "volume indicator",
+  "media controls",
+  "music",
+  "OSD",
+]
+copyright = "Copyright (c) 2026 Akiva Miura"
+license_terms = "MIT License or Apache License 2.0, at your option: https://github.com/akivajp/flexflyout#license"
+developed_by = "Akiva Miura"
+
+# Screenshots (PNG, 1366x768 or larger), in this order; replaced only when the
+# workflow runs with images = true.
+
+[[screenshots]]
+file = "screenshots/en-1-flyout.png"
+caption = "What's playing, with controls and the volume, when you change the volume"
+
+[[screenshots]]
+file = "screenshots/en-2-settings.png"
+caption = "Choose the monitor, the place, the size, the display time and the look"
+
+[[screenshots]]
+file = "screenshots/en-3-new-track.png"
+caption = "A small panel for a new track; click it for the whole flyout"
+
+[[screenshots]]
+file = "screenshots/en-4-light.png"
+caption = "Light or dark, following Windows if you like"

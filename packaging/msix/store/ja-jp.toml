@@ -1,0 +1,78 @@
+# FlexFlyout's Microsoft Store listing in Japanese, applied by the
+# Microsoft Store workflow (.github/workflows/msstore.yml, akivajp/msstore-submit).
+# Fields left out keep the values of the last submission.
+
+title = "FlexFlyout"
+short_description = "Windows 11 用の Media Flyout です。音量を変えると、再生中の音楽や動画を操作ボタンと音量と一緒に、選んだモニター・位置・大きさで表示します。"
+description = '''
+FlexFlyout は、音量を変えたときやメディアキーを押したときに、再生中の曲のジャケット・曲名・アーティストを、再生位置のバー・再生の操作ボタン・音量と一緒に表示し、数秒で消える Flyout です。新しい曲が始まると小さな表示でお知らせし、クリックすると全体を表示します。
+
+モニターの数や大きさは人それぞれなので、表示のすべてを調整できます。
+• 表示するモニター: メインのモニター、マウスのある画面、番号で指定
+• 位置: 9 か所の基準点と、ピクセル単位のずらし幅
+• 大きさ・表示時間・不透明度
+• 明るい色・暗い色（Windows に合わせることも）、アクセントの色、角の丸み、表示する部品
+
+Spotify、Web ブラウザー、メディア プレーヤーなど、Windows のメディアの操作に表示されるアプリに対応しています。
+
+そのほかにも:
+• Windows 標準の音量表示は、残して重ならない位置に出すか、消すかを選べます
+• 追いかけるプレーヤーを 1 つに決められます（ブラウザーで動画を見ても切り替わりません）
+• 全画面のゲームを動かしているモニターには表示しない設定
+• 再生位置の移動、シャッフル、リピート、ミュート。音量バーはドラッグやマウスのホイールでも
+• ピン留めすると表示したままになり、好きな場所へドラッグできます
+• 英語と日本語に対応
+
+FlexFlyout は通知領域で動き、設定ウィンドウで変えた内容はその場で Flyout に表示されます。データを集めることはなく、Microsoft Store から入れた場合はネットワークにも接続しません。
+
+FlexFlyout は無料のオープンソースです（MIT または Apache 2.0）: https://github.com/akivajp/flexflyout'''
+# "What's new in this version": rewrite for each release.
+release_notes = "起動すると Flyout を一度表示するようにしました。初めての起動では設定画面も開きます。"
+features = [
+  "音量を変えたときやメディアキーで、再生中の曲を操作ボタンと音量と一緒に表示",
+  "新しい曲は小さな表示でお知らせ",
+  "表示するモニターを選べる（メイン・マウスのある画面・番号）",
+  "9 か所の基準点とピクセル単位のずらし幅",
+  "大きさ・表示時間・不透明度を調整",
+  "明るい色・暗い色（Windows に合わせることも）、アクセントの色、角の丸み",
+  "Windows 標準の音量表示を避けて表示、または消す",
+  "追いかけるプレーヤーを 1 つに決められる",
+  "全画面のゲームのモニターには表示しない設定",
+  "再生位置のバー、シャッフル、リピート、ミュート、音量はドラッグやホイールでも",
+  "ピン留めとドラッグでの移動",
+  "Windows の起動時に開始",
+  "英語と日本語に対応",
+  "無料のオープンソース",
+]
+# Search terms, 7 at most.
+keywords = [
+  "音量",
+  "フライアウト",
+  "再生中の曲",
+  "メディア",
+  "音楽",
+  "OSD",
+  "volume flyout",
+]
+copyright = "Copyright (c) 2026 Akiva Miura"
+license_terms = "MIT License または Apache License 2.0 のいずれかを選択できます: https://github.com/akivajp/flexflyout#license"
+developed_by = "Akiva Miura"
+
+# Screenshots (PNG, 1366x768 or larger), in this order; replaced only when the
+# workflow runs with images = true.
+
+[[screenshots]]
+file = "screenshots/ja-1-flyout.png"
+caption = "音量を変えると、再生中の曲を操作ボタンと音量と一緒に表示"
+
+[[screenshots]]
+file = "screenshots/ja-2-settings.png"
+caption = "表示するモニター・位置・大きさ・表示時間・見た目を自由に"
+
+[[screenshots]]
+file = "screenshots/ja-3-new-track.png"
+caption = "新しい曲は小さな表示で。クリックで全体を表示"
+
+[[screenshots]]
+file = "screenshots/ja-4-light.png"
+caption = "明るい色・暗い色。Windows に合わせることも"
