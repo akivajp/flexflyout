@@ -2,10 +2,10 @@
 # The release binary of FlexFlyout for Arch Linux and derivatives (CachyOS,
 # EndeavourOS, Manjaro). Build and install with: makepkg -si
 pkgname=flexflyout-bin
-pkgver=0.10.0
+pkgver=0.11.0
 pkgrel=1
 pkgdesc="Media flyout for KDE Plasma (Wayland): cover art, playback controls and volume, sized and placed where you want"
-arch=('x86_64')
+arch=('x86_64' 'aarch64')
 url="https://github.com/akivajp/flexflyout"
 license=('MIT OR Apache-2.0')
 depends=('glibc' 'gcc-libs' 'wayland' 'libxkbcommon' 'vulkan-icd-loader' 'fontconfig' 'xdg-utils')
@@ -13,12 +13,14 @@ optdepends=('pipewire-pulse: the volume with PipeWire (PulseAudio works as is)'
             'mesa: OpenGL or Vulkan drawing on Intel and AMD graphics')
 provides=('flexflyout')
 conflicts=('flexflyout')
-_archive="flexflyout-v${pkgver}-x86_64-unknown-linux-gnu"
-source=("https://github.com/akivajp/flexflyout/releases/download/v${pkgver}/${_archive}.tar.gz")
-sha256sums=('da73090fe132a979784d292282eefc3dfed30a773ebc3b40a089408bd1a2dd5b')
+_release="https://github.com/akivajp/flexflyout/releases/download/v${pkgver}"
+source_x86_64=("${_release}/flexflyout-v${pkgver}-x86_64-unknown-linux-gnu.tar.gz")
+source_aarch64=("${_release}/flexflyout-v${pkgver}-aarch64-unknown-linux-gnu.tar.gz")
+sha256sums_x86_64=('840a60774846a2c514aa20d3174c7eb7ad81b61a504e613e2faccb0d1a7861e2')
+sha256sums_aarch64=('747bb5bd8a0d28474ada9779cedb4e403f6d53a4edc4284b0176339802553fe8')
 
 package() {
-    cd "${_archive}"
+    cd "flexflyout-v${pkgver}-${CARCH}-unknown-linux-gnu"
     install -Dm755 flexflyout "${pkgdir}/usr/bin/flexflyout"
     install -Dm644 flexflyout.desktop "${pkgdir}/usr/share/applications/flexflyout.desktop"
     install -Dm644 flexflyout.png "${pkgdir}/usr/share/icons/hicolor/256x256/apps/flexflyout.png"

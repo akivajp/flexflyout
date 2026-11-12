@@ -1,18 +1,24 @@
 # yaml-language-server: $schema=https://aka.ms/winget-manifest.installer.1.12.0.schema.json
 
 PackageIdentifier: akivajp.FlexFlyout
-PackageVersion: 0.10.0
+PackageVersion: 0.11.0
 InstallerType: zip
 NestedInstallerType: portable
-NestedInstallerFiles:
-- RelativeFilePath: flexflyout-v0.10.0-x86_64-pc-windows-msvc\flexflyout.exe
-  PortableCommandAlias: flexflyout
 Commands:
 - flexflyout
-ReleaseDate: 2026-11-08
+ReleaseDate: 2026-11-13
 Installers:
 - Architecture: x64
-  InstallerUrl: https://github.com/akivajp/flexflyout/releases/download/v0.10.0/flexflyout-v0.10.0-x86_64-pc-windows-msvc.zip
-  InstallerSha256: 0427709B13590446B1383AD390C8462758164338C1E4D583D6165F9F87B8DD6E
+  NestedInstallerFiles:
+  - RelativeFilePath: flexflyout-v0.11.0-x86_64-pc-windows-msvc\flexflyout.exe
+    PortableCommandAlias: flexflyout
+  InstallerUrl: https://github.com/akivajp/flexflyout/releases/download/v0.11.0/flexflyout-v0.11.0-x86_64-pc-windows-msvc.zip
+  InstallerSha256: 9B06450A5484CEEC029298CEF1DC2313505682814E105CDDD4F5BC3EBBB85B0A
+- Architecture: arm64
+  NestedInstallerFiles:
+  - RelativeFilePath: flexflyout-v0.11.0-aarch64-pc-windows-msvc\flexflyout.exe
+    PortableCommandAlias: flexflyout
+  InstallerUrl: https://github.com/akivajp/flexflyout/releases/download/v0.11.0/flexflyout-v0.11.0-aarch64-pc-windows-msvc.zip
+  InstallerSha256: AA7D64C0AD29E2A05160731F130E6DF716FD7FF92CFA7B9E974A72E70CB72B9F
 ManifestType: installer
 ManifestVersion: 1.12.0
