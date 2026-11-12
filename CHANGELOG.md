@@ -7,6 +7,8 @@ include breaking changes).
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-11-13
+
 ### Added
 - ARM64 builds: Windows on Arm (the zip, and a native package on the
   Microsoft Store) and Linux (`aarch64-unknown-linux-gnu`). The CI builds
@@ -198,7 +200,8 @@ The first release, for Windows 11.
 - English and Japanese.
 - `flexflyout --demo` shows sample tracks.
 
-[Unreleased]: https://github.com/akivajp/flexflyout/compare/v0.10.0...HEAD
+[Unreleased]: https://github.com/akivajp/flexflyout/compare/v0.11.0...HEAD
+[0.11.0]: https://github.com/akivajp/flexflyout/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/akivajp/flexflyout/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/akivajp/flexflyout/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/akivajp/flexflyout/compare/v0.7.0...v0.8.0

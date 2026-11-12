@@ -27,7 +27,7 @@ FlexFlyout は通知領域で動き、設定ウィンドウで変えた内容は
 
 FlexFlyout は無料のオープンソースです（MIT または Apache 2.0）: https://github.com/akivajp/flexflyout'''
 # "What's new in this version": rewrite for each release.
-release_notes = "起動すると Flyout を一度表示するようにしました。初めての起動では設定画面も開きます。"
+release_notes = "Arm 版の Windows（ARM64）向けのネイティブのパッケージを追加しました。x64 の PC での動作は変わりません。"
 features = [
   "音量を変えたときやメディアキーで、再生中の曲を操作ボタンと音量と一緒に表示",
   "新しい曲は小さな表示でお知らせ",

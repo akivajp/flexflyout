@@ -27,7 +27,7 @@ FlexFlyout lives in the notification area, and its settings window shows each ch
 
 FlexFlyout is free and open source (MIT or Apache 2.0): https://github.com/akivajp/flexflyout'''
 # "What's new in this version": rewrite for each release.
-release_notes = "Starting FlexFlyout now shows the flyout once, so you can see it runs; the first start also opens the settings window."
+release_notes = "Adds a native package for Windows on Arm (ARM64); nothing changes on x64 PCs."
 features = [
   "Shows the playing track, playback controls and the volume when you change the volume or press a media key",
   "A small panel for each new track",
