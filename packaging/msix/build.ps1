@@ -14,7 +14,7 @@
   test PC (Add-AppxPackage).
 
 .EXAMPLE
-  ./packaging/msix/build.ps1 -Exe target/release/flexflyout.exe -Version 0.9.0 -OutDir dist -TestSign
+  ./packaging/msix/build.ps1 -Exe target/release/flexflyout.exe -Version 0.9.0 -OutDir dist -Arch x64 -TestSign
 #>
 param(
   # The executable to package.
@@ -23,6 +23,8 @@ param(
   [Parameter(Mandatory)] [string] $Version,
   # Where the package (and the test copy) go.
   [Parameter(Mandatory)] [string] $OutDir,
+  # The architecture the executable was built for.
+  [ValidateSet("x64", "arm64")] [string] $Arch = "x64",
   # Partner Center > the app > Product identity: Package/Identity/Name.
   [string] $IdentityName = "akivajp.FlexFlyout",
   # Product identity: Package/Identity/Publisher.
@@ -43,9 +45,15 @@ function Invoke-Tool([string] $Tool, [string[]] $Arguments) {
 
 if ($Version -notmatch '^\d+\.\d+\.\d+$') { throw "version $Version is not x.y.z" }
 
-# The newest SDK's tools.
-$bin = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin\10.*\x64\makeappx.exe" |
-  Sort-Object { [version]$_.Directory.Parent.Name } | Select-Object -Last 1
+# The newest SDK's tools, for this machine's own architecture if the SDK
+# has them (the x64 ones run on ARM64 too, emulated).
+$bin = $null
+foreach ($tools in @($(if ($env:PROCESSOR_ARCHITECTURE -eq "ARM64") { "arm64" }), "x64")) {
+  if (-not $tools) { continue }
+  $bin = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin\10.*\$tools\makeappx.exe" -ErrorAction SilentlyContinue |
+    Sort-Object { [version]$_.Directory.Parent.Name } | Select-Object -Last 1
+  if ($bin) { break }
+}
 if (-not $bin) { throw "the Windows SDK (makeappx.exe) is not installed" }
 $sdk = $bin.Directory.FullName
 Write-Host "Windows SDK tools: $sdk"
@@ -62,7 +70,8 @@ $manifest = (Get-Content -Raw (Join-Path $here "AppxManifest.xml")).
   Replace("@IDENTITY_NAME@", $IdentityName).
   Replace("@PUBLISHER@", [System.Security.SecurityElement]::Escape($Publisher)).
   Replace("@PUBLISHER_DISPLAY_NAME@", [System.Security.SecurityElement]::Escape($PublisherDisplayName)).
-  Replace("@VERSION@", "$Version.0")
+  Replace("@VERSION@", "$Version.0").
+  Replace("@ARCH@", $Arch)
 Set-Content -Encoding utf8 (Join-Path $layout "AppxManifest.xml") $manifest
 
 # resources.pri: lets Windows pick Assets\Square44x44Logo.scale-200.png and
@@ -79,7 +88,7 @@ Invoke-Tool "$sdk\makepri.exe" @("new", "/pr", $layout, "/cf", $priconfig,
   "/mn", (Join-Path $layout "AppxManifest.xml"), "/of", (Join-Path $layout "resources.pri"), "/o")
 
 # The package for the Store.
-$name = "flexflyout-v$Version-x64"
+$name = "flexflyout-v$Version-$Arch"
 $msix = Join-Path $OutDir "$name.msix"
 Invoke-Tool "$sdk\makeappx.exe" @("pack", "/d", $layout, "/p", $msix, "/o")
 Write-Host "Package: $msix"

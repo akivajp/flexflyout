@@ -19,8 +19,8 @@ jobs:
       fail-fast: false
       matrix:
         # Each builds and tests its own host (Windows: eframe; Linux:
-        # layer-shell) along with the shared crates.
-        os: [ubuntu-latest, windows-latest]
+        # layer-shell) along with the shared crates, on x86-64 and ARM64.
+        os: [ubuntu-latest, windows-latest, ubuntu-24.04-arm, windows-11-arm]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
@@ -36,34 +36,85 @@ jobs:
         run: cargo test --workspace
 
   linux-binary:
-    name: Linux binary
+    name: Linux binary (${{ matrix.arch }})
     needs: test
-    # The oldest supported Ubuntu, so that the binary runs on glibc 2.35+.
-    runs-on: ubuntu-22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        # The oldest supported Ubuntu, so that the binary runs on glibc 2.35+.
+        include:
+          - { arch: x86_64, runner: ubuntu-22.04 }
+          - { arch: aarch64, runner: ubuntu-22.04-arm }
+    runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: Build the release binary
         run: cargo build --release -p flexflyout
+      # The demo in a headless sway, drawn in software (lavapipe): the
+      # flyout must come up and be drawn. No ARM64 machine is at hand, so
+      # this is what says that build works.
+      - name: Smoke test (the demo in a headless sway)
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q sway mesa-vulkan-drivers dbus
+          export XDG_RUNTIME_DIR="$(mktemp -d)"
+          chmod 700 "$XDG_RUNTIME_DIR"
+          printf 'output HEADLESS-1 resolution 1280x800\n' > "$XDG_RUNTIME_DIR/sway.conf"
+          WLR_BACKENDS=headless WLR_RENDERER=pixman WLR_LIBINPUT_NO_DEVICES=1 \
+            sway -c "$XDG_RUNTIME_DIR/sway.conf" > sway.log 2>&1 &
+          sleep 3
+          socket="$(find "$XDG_RUNTIME_DIR" -maxdepth 1 -name 'wayland-*' ! -name '*.lock' | head -1)"
+          if [[ -z "$socket" ]]; then cat sway.log; echo "sway did not start" >&2; exit 1; fi
+          export WAYLAND_DISPLAY="$(basename "$socket")"
+          status=0
+          timeout 90 dbus-run-session -- target/release/flexflyout --demo --cycles 2 \
+            --config "$XDG_RUNTIME_DIR/config.toml" --log-file smoke.log || status=$?
+          cat smoke.log || true
+          if [[ $status -ne 0 ]]; then cat sway.log; echo "the demo failed ($status)" >&2; exit 1; fi
+          grep -q "drawing" smoke.log || { echo "the flyout was not drawn" >&2; exit 1; }
       - uses: actions/upload-artifact@v7
         with:
-          name: flexflyout-linux-x86_64
+          name: flexflyout-linux-${{ matrix.arch }}
           path: target/release/flexflyout
           retention-days: 30
 
   windows-binary:
-    name: Windows binary
+    name: Windows binary (${{ matrix.arch }})
     needs: test
-    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { arch: x86_64, runner: windows-latest }
+          - { arch: aarch64, runner: windows-11-arm }
+    runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: Build the release binary
         run: cargo build --release -p flexflyout
+      # The demo: the flyout must come up and be drawn (in software here).
+      # No ARM64 machine is at hand, so this is what says that build works.
+      - name: Smoke test (the demo)
+        shell: pwsh
+        run: |
+          $log = Join-Path $env:RUNNER_TEMP "smoke.log"
+          $config = Join-Path $env:RUNNER_TEMP "smoke-config.toml"
+          $demo = Start-Process target\release\flexflyout.exe -PassThru `
+            -ArgumentList "--demo", "--cycles", "2", "--config", $config, "--log-file", $log
+          if (-not $demo.WaitForExit(90000)) {
+            $demo.Kill()
+            if (Test-Path $log) { Get-Content $log }
+            throw "the demo did not end"
+          }
+          Get-Content $log
+          if ($demo.ExitCode -ne 0) { throw "the demo failed ($($demo.ExitCode))" }
+          if (-not (Select-String -Path $log -Pattern "drawing" -Quiet)) { throw "the flyout was not drawn" }
       - uses: actions/upload-artifact@v7
         with:
-          name: flexflyout-windows-x86_64
+          name: flexflyout-windows-${{ matrix.arch }}
           path: target/release/flexflyout.exe
           retention-days: 30
