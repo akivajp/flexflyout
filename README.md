@@ -32,8 +32,10 @@ Screen sizes and monitor setups differ from desk to desk, so every part of the f
 
 | Platform | Status |
 |---|---|
-| Windows 11 | Available (x86_64) |
-| Linux — KDE Plasma (Wayland) | Available (x86_64); also sway, Hyprland and other compositors with layer-shell |
+| Windows 11 | Available (x86_64 and ARM64) |
+| Linux — KDE Plasma (Wayland) | Available (x86_64 and ARM64); also sway, Hyprland and other compositors with layer-shell |
+
+The ARM64 builds are built and started (the demo) on ARM64 machines by the CI, but not yet tried on real ARM64 hardware: reports are welcome.
 | Linux — GNOME (Wayland) | Planned, as a small GNOME Shell extension that draws what FlexFlyout sends |
 | macOS | Future |
 
@@ -50,7 +52,7 @@ scoop install akivajp/flexflyout
 
 If you installed it from the manifest URL before, switch to the bucket as its README explains, so that updates keep coming.
 
-Or download `flexflyout-<version>-x86_64-pc-windows-msvc.zip` from the [Releases](https://github.com/akivajp/flexflyout/releases) page, extract it anywhere and run `flexflyout.exe` (`SHA256SUMS` lists the checksum). The release is not code-signed yet, so Windows SmartScreen may warn the first time: choose **More info** → **Run anyway**.
+Or download `flexflyout-<version>-x86_64-pc-windows-msvc.zip` (`aarch64-pc-windows-msvc` for Windows on Arm) from the [Releases](https://github.com/akivajp/flexflyout/releases) page, extract it anywhere and run `flexflyout.exe` (`SHA256SUMS` lists the checksum). The release is not code-signed yet, so Windows SmartScreen may warn the first time: choose **More info** → **Run anyway**.
 
 FlexFlyout runs in the notification area (the tray); its icon's tooltip shows the track that plays. Its menu shows the flyout, opens the settings window, turns **Start with Windows** on or off, and quits. Starting FlexFlyout shows the flyout once, and the very first start opens the settings window too; starting it again while it runs opens the settings window. The settings are saved in `%APPDATA%\flexflyout\config.toml`, which can also be edited by hand (it is applied within a second of saving). `flexflyout --help` lists the command-line options; `flexflyout --demo` shows sample tracks.
 
@@ -73,7 +75,7 @@ git clone https://github.com/akivajp/flexflyout.git
 cd flexflyout/packaging/aur/flexflyout-bin && makepkg -si
 ```
 
-Elsewhere (glibc 2.35 or newer), download `flexflyout-<version>-x86_64-unknown-linux-gnu.tar.gz` from the [Releases](https://github.com/akivajp/flexflyout/releases) page and put `flexflyout` on your `PATH`; `flexflyout.desktop` and `flexflyout.png` go to `~/.local/share/applications` and `~/.local/share/icons/hicolor/256x256/apps` for a menu entry.
+Elsewhere (glibc 2.35 or newer), download `flexflyout-<version>-x86_64-unknown-linux-gnu.tar.gz` (`aarch64-unknown-linux-gnu` for ARM64) from the [Releases](https://github.com/akivajp/flexflyout/releases) page and put `flexflyout` on your `PATH`; `flexflyout.desktop` and `flexflyout.png` go to `~/.local/share/applications` and `~/.local/share/icons/hicolor/256x256/apps` for a menu entry.
 
 Start it from the menu or with `flexflyout`; starting it again while it runs opens the settings window. The tray icon (on KDE Plasma) has the same menu and tooltip as on Windows, with **Start at login** instead. The settings are in `~/.config/flexflyout/config.toml` and the log in `~/.local/state/flexflyout/`. As on Windows, FlexFlyout stays clear of KDE Plasma's own volume popup, or hides it (the volume popup only; Plasma's brightness and other popups stay) while it runs.
 

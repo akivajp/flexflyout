@@ -10,9 +10,9 @@ FlexFlyout's package for the Microsoft Store. The same `flexflyout.exe` as in th
 
 The release workflow (`.github/workflows/release.yml`) builds the package on every tag, and when run by hand. The artifact `flexflyout-msix` holds:
 
-- `flexflyout-vX.Y.Z-x64.msix`: for Partner Center (unsigned; the Store signs what it publishes);
-- `flexflyout-vX.Y.Z-x64-test.msix` and `-test.cer`: a copy signed with a throwaway self-signed certificate, for trying the package;
-- `wack-report.xml`: the Windows App Certification Kit's report on the package (the checks Partner Center runs).
+- `flexflyout-vX.Y.Z-x64.msix` and `-arm64.msix`: for the Store (unsigned; the Store signs what it publishes), each built on a machine of its architecture;
+- `flexflyout-vX.Y.Z-x64-test.msix`, `-arm64-test.msix` and their `-test.cer`: copies signed with a throwaway self-signed certificate, for trying the packages;
+- `wack-report-x64.xml`: the Windows App Certification Kit's report on the x64 package (the checks Partner Center runs; GitHub's ARM64 machines do not have the kit).
 
 On Windows with the Windows SDK, the same by hand:
 
@@ -42,7 +42,7 @@ The images in `Assets/` are rendered from `crates/flexflyout/assets/flexflyout.s
    gh variable set MSIX_PUBLISHER_DISPLAY_NAME --body "<Package/Properties/PublisherDisplayName>"
    ```
 
-4. Run the release workflow (or tag a release), and upload `flexflyout-vX.Y.Z-x64.msix` from the `flexflyout-msix` artifact to the submission's **Packages**.
+4. Run the release workflow (or tag a release), and upload `flexflyout-vX.Y.Z-x64.msix` and `-arm64.msix` from the `flexflyout-msix` artifact to the submission's **Packages** (after the first submission, the release workflow does this through the Store's API).
 5. The rest of the submission (the values and the listing texts in English and Japanese are in [`store-listing.ja.md`](store-listing.ja.md), in Japanese for the Japanese Partner Center):
    - **Pricing**: free. **Properties**: category (Utilities & tools), privacy policy URL `https://github.com/akivajp/flexflyout#privacy`.
    - **Age ratings**: the questionnaire (no user content, no purchases).

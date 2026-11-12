@@ -1,8 +1,8 @@
 name: Release
 
-# Pushing a tag such as v0.1.0 builds the Windows and Linux binaries and
-# publishes a GitHub Release with notes from CHANGELOG.md, the archives
-# and their checksums.
+# Pushing a tag such as v0.1.0 builds the Windows and Linux binaries
+# (x86-64 and ARM64) and publishes a GitHub Release with notes from
+# CHANGELOG.md, the archives and their checksums.
 #
 # Running the workflow by hand only builds the archives (uploaded as
 # artifacts), to check the packaging.

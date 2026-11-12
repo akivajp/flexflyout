@@ -32,8 +32,10 @@
 
 | 環境 | 状況 |
 |---|---|
-| Windows 11 | 公開中（x86_64） |
-| Linux — KDE Plasma（Wayland） | 公開中（x86_64）。sway・Hyprland など、layer-shell に対応するほかの環境でも動く |
+| Windows 11 | 公開中（x86_64・ARM64） |
+| Linux — KDE Plasma（Wayland） | 公開中（x86_64・ARM64）。sway・Hyprland など、layer-shell に対応するほかの環境でも動く |
+
+ARM64 版は、CI が ARM64 のマシンでビルドして起動（デモ）まで確かめていますが、ARM64 の実機ではまだ試せていません。動作の報告を歓迎します。
 | Linux — GNOME（Wayland） | 予定。FlexFlyout から送った内容を描くだけの、小さな GNOME Shell 拡張として作る |
 | macOS | 将来 |
 
@@ -50,7 +52,7 @@ scoop install akivajp/flexflyout
 
 以前に定義ファイルの URL から入れた場合は、更新が届くように、バケットの README の手順でバケットに切り替えてください。
 
-または、[Releases](https://github.com/akivajp/flexflyout/releases) のページから `flexflyout-<版>-x86_64-pc-windows-msvc.zip` を取り、好きな場所に展開して `flexflyout.exe` を起動します（チェックサムは `SHA256SUMS`）。まだコード署名をしていないため、初回に Windows SmartScreen の警告が出ることがあります。**詳細情報** → **実行** を選んでください。
+または、[Releases](https://github.com/akivajp/flexflyout/releases) のページから `flexflyout-<版>-x86_64-pc-windows-msvc.zip`（Arm 版の Windows は `aarch64-pc-windows-msvc`）を取り、好きな場所に展開して `flexflyout.exe` を起動します（チェックサムは `SHA256SUMS`）。まだコード署名をしていないため、初回に Windows SmartScreen の警告が出ることがあります。**詳細情報** → **実行** を選んでください。
 
 FlexFlyout は通知領域（タスクトレイ）で動き、アイコンにマウスを乗せると再生中の曲が出ます。メニューから、Flyout の表示・設定ウィンドウ・**Windows の起動時に開始**の切り替え・終了ができます。起動すると Flyout を一度表示し、初めての起動では設定ウィンドウも開きます。動いているときにもう一度起動すると、設定ウィンドウが開きます。設定は `%APPDATA%\flexflyout\config.toml` に保存され、手で書き換えることもできます（保存して1秒以内に反映）。`flexflyout --help` でコマンドラインのオプションを、`flexflyout --demo` で見本の曲を表示できます。
 
@@ -73,7 +75,7 @@ git clone https://github.com/akivajp/flexflyout.git
 cd flexflyout/packaging/aur/flexflyout-bin && makepkg -si
 ```
 
-ほかのディストリビューション（glibc 2.35 以降）では、[Releases](https://github.com/akivajp/flexflyout/releases) のページから `flexflyout-<版>-x86_64-unknown-linux-gnu.tar.gz` を取り、`flexflyout` を `PATH` の通った場所に置きます。メニュー項目が要る場合は、`flexflyout.desktop` を `~/.local/share/applications` に、`flexflyout.png` を `~/.local/share/icons/hicolor/256x256/apps` に置いてください。
+ほかのディストリビューション（glibc 2.35 以降）では、[Releases](https://github.com/akivajp/flexflyout/releases) のページから `flexflyout-<版>-x86_64-unknown-linux-gnu.tar.gz`（ARM64 は `aarch64-unknown-linux-gnu`）を取り、`flexflyout` を `PATH` の通った場所に置きます。メニュー項目が要る場合は、`flexflyout.desktop` を `~/.local/share/applications` に、`flexflyout.png` を `~/.local/share/icons/hicolor/256x256/apps` に置いてください。
 
 メニューか `flexflyout` で起動します（動いているときにもう一度起動すると、設定ウィンドウが開きます）。タスクトレイのアイコン（KDE Plasma）のメニューとマウスを乗せたときの表示は Windows と同じで、自動起動は **ログイン時に開始** です。設定は `~/.config/flexflyout/config.toml`、ログは `~/.local/state/flexflyout/` にあります。Windows と同じく、KDE Plasma 自身の音量表示と重ならないように表示するか、動いている間だけ消すかを選べます（消えるのは音量の表示だけで、明るさなどの表示は残ります）。
 

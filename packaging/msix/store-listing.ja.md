@@ -30,7 +30,7 @@ Partner Center（日本語の画面）で FlexFlyout を申請するときに入
 
 ## パッケージ
 
-- リリースのワークフローの成果物 `flexflyout-msix` の `flexflyout-vX.Y.Z-x64.msix` を上げる（`-test` の付いたものではない）
+- リリースのワークフローの成果物 `flexflyout-msix` の `flexflyout-vX.Y.Z-x64.msix` と `-arm64.msix` を上げる（`-test` の付いたものではない。最初の申請の後は、リリースのワークフローが API で上げる）
 - デバイス ファミリ: Windows 10/11 デスクトップ（マニフェストでは Windows 11 以上を指定）
 
 ## 申請オプション

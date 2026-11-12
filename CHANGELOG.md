@@ -7,6 +7,12 @@ include breaking changes).
 
 ## [Unreleased]
 
+### Added
+- ARM64 builds: Windows on Arm (the zip, and a native package on the
+  Microsoft Store) and Linux (`aarch64-unknown-linux-gnu`). The CI builds
+  them on ARM64 machines and starts the demo there; they have not been
+  tried on real ARM64 hardware yet.
+
 ## [0.10.0] - 2026-11-10
 
 ### Added
