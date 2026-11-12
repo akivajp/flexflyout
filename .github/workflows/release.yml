@@ -19,10 +19,17 @@ env:
 
 jobs:
   build:
-    name: Build (x86_64-pc-windows-msvc)
-    # On Windows, where the resource compiler embeds the icon and the
-    # version information (build.rs).
-    runs-on: windows-latest
+    name: Build (${{ matrix.target }})
+    strategy:
+      fail-fast: false
+      matrix:
+        # On Windows, where the resource compiler embeds the icon and the
+        # version information (build.rs); each architecture on its own
+        # kind of machine.
+        include:
+          - { target: x86_64-pc-windows-msvc, arch: x64, runner: windows-latest }
+          - { target: aarch64-pc-windows-msvc, arch: arm64, runner: windows-11-arm }
+    runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
@@ -37,7 +44,7 @@ jobs:
           else
             version="dev-${GITHUB_SHA::7}"
           fi
-          name="flexflyout-${version}-x86_64-pc-windows-msvc"
+          name="flexflyout-${version}-${{ matrix.target }}"
           mkdir -p "dist/$name"
           cp target/release/flexflyout.exe "dist/$name/"
           cp README.md README.ja.md CHANGELOG.md LICENSE-MIT LICENSE-APACHE "dist/$name/"
@@ -47,7 +54,7 @@ jobs:
           ls -l
       - uses: actions/upload-artifact@v7
         with:
-          name: flexflyout-x86_64-pc-windows-msvc
+          name: flexflyout-${{ matrix.target }}
           path: dist/*
           retention-days: 30
       # The MSIX package for the Microsoft Store (uploaded to Partner Center
@@ -64,7 +71,7 @@ jobs:
         run: |
           $version = (Select-String -Path Cargo.toml -Pattern '^version = "(.*)"' |
             Select-Object -First 1).Matches.Groups[1].Value
-          $params = @{ Exe = "target/release/flexflyout.exe"; Version = $version; OutDir = "msix"; TestSign = $true }
+          $params = @{ Exe = "target/release/flexflyout.exe"; Version = $version; OutDir = "msix"; Arch = "${{ matrix.arch }}"; TestSign = $true }
           if ($env:MSIX_IDENTITY_NAME) { $params.IdentityName = $env:MSIX_IDENTITY_NAME }
           if ($env:MSIX_PUBLISHER) { $params.Publisher = $env:MSIX_PUBLISHER }
           if ($env:MSIX_PUBLISHER_DISPLAY_NAME) { $params.PublisherDisplayName = $env:MSIX_PUBLISHER_DISPLAY_NAME }
@@ -82,10 +89,11 @@ jobs:
           $test = Get-ChildItem msix/*-test.msix | Select-Object -First 1
           Import-Certificate -FilePath $cer.FullName -CertStoreLocation Cert:\LocalMachine\TrustedPeople | Out-Null
           & $appcert reset
-          & $appcert test -appxpackagepath $test.FullName -reportoutputpath "$PWD\msix\wack-report.xml"
+          $wack = "msix/wack-report-${{ matrix.arch }}.xml"
+          & $appcert test -appxpackagepath $test.FullName -reportoutputpath (Join-Path $PWD $wack)
           Write-Host "appcert exit code: $LASTEXITCODE"
-          if (Test-Path msix/wack-report.xml) {
-            [xml] $report = Get-Content -Raw msix/wack-report.xml
+          if (Test-Path $wack) {
+            [xml] $report = Get-Content -Raw $wack
             Write-Host "Overall: $($report.REPORT.OVERALL_RESULT)"
             $report.SelectNodes("//TEST[RESULT!='PASS']") | ForEach-Object {
               Write-Host "$($_.RESULT): $($_.NAME)"
@@ -93,14 +101,34 @@ jobs:
           }
       - uses: actions/upload-artifact@v7
         with:
-          name: flexflyout-msix
+          name: flexflyout-msix-${{ matrix.arch }}
           path: msix/*
           retention-days: 30
 
+  # One artifact with the MSIX packages of both architectures, for the
+  # Microsoft Store submission.
+  msix:
+    name: MSIX packages
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/upload-artifact/merge@v7
+        with:
+          name: flexflyout-msix
+          pattern: flexflyout-msix-*
+          delete-merged: true
+          retention-days: 30
+
   build-linux:
-    name: Build (x86_64-unknown-linux-gnu)
-    # The oldest supported Ubuntu, so that the binary runs on glibc 2.35+.
-    runs-on: ubuntu-22.04
+    name: Build (${{ matrix.target }})
+    strategy:
+      fail-fast: false
+      matrix:
+        # The oldest supported Ubuntu, so that the binary runs on glibc 2.35+.
+        include:
+          - { target: x86_64-unknown-linux-gnu, runner: ubuntu-22.04 }
+          - { target: aarch64-unknown-linux-gnu, runner: ubuntu-22.04-arm }
+    runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
@@ -114,7 +142,7 @@ jobs:
           else
             version="dev-${GITHUB_SHA::7}"
           fi
-          name="flexflyout-${version}-x86_64-unknown-linux-gnu"
+          name="flexflyout-${version}-${{ matrix.target }}"
           mkdir -p "dist/$name"
           cp target/release/flexflyout "dist/$name/"
           cp packaging/linux/flexflyout.desktop crates/flexflyout/assets/flexflyout.png crates/flexflyout/assets/flexflyout.svg "dist/$name/"
@@ -124,19 +152,19 @@ jobs:
           ls -l dist
       - uses: actions/upload-artifact@v7
         with:
-          name: flexflyout-x86_64-unknown-linux-gnu
+          name: flexflyout-${{ matrix.target }}
           path: dist/*
           retention-days: 30
 
-  # A new Microsoft Store submission with this version's MSIX package and
-  # the listing files (packaging/msix/store), through akivajp/msstore-submit
+  # A new Microsoft Store submission with this version's MSIX packages
+  # (x64 and ARM64) and the listing files (packaging/msix/store), through akivajp/msstore-submit
   # (GitHub OIDC; the environment `msstore` is what Entra ID trusts). Left
   # as a draft: its log shows what changes, and the Microsoft Store
   # workflow's commit command submits it (Partner Center shows the changes
   # only once committed; don't edit or submit it there). Tags only.
   store:
     name: Microsoft Store submission
-    needs: build
+    needs: msix
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     permissions:
       contents: read
@@ -146,8 +174,10 @@ jobs:
       app-id: 9P6KDQX7JZS4
       command: submit
       artifact: flexflyout-msix
-      # The Store's package, not the test copy (-x64-test.msix).
-      package: flexflyout-v*-x64.msix
+      # The Store's packages (-x64.msix and -arm64.msix), not the test
+      # copies (-x64-test.msix, -arm64-test.msix).
+      package: flexflyout-v*64.msix
+      package-count: 2
       listings: packaging/msix/store
       commit: false
 
@@ -170,8 +200,9 @@ jobs:
       - uses: actions/download-artifact@v8
         with:
           path: dist
-          # The archives only (the MSIX package is for Partner Center).
-          pattern: flexflyout-x86_64-*
+          # The archives only (flexflyout-x86_64-..., flexflyout-aarch64-...),
+          # not the MSIX packages (flexflyout-msix), which are for the Store.
+          pattern: flexflyout-*64-*
           merge-multiple: true
       - name: Checksums
         run: cd dist && sha256sum * > SHA256SUMS && cat SHA256SUMS
