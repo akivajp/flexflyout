@@ -50,12 +50,15 @@ Partner Center（日本語の画面）で FlexFlyout を申請するときに入
 
 スクリーンショットは `packaging/msix/store/screenshots/` にある。共有の Windows 11 の仮想マシンで、試験用の MSIX（Store 版と同じく、設定ウィンドウに新しい版の確認の項目が無い）を入れて撮った。曲は架空の曲と自作のジャケットを Edge で流し（プレーヤーの名前がどの言語でも「Microsoft Edge」になる）、壁紙も自作。評価版の透かしとタスクバーを外して 16:9 に切り抜き、1366×768 に拡大した。番号の順に登録する。
 
+1 枚目は検索結果や一覧のカード（幅 300px ほど）にも出るので、Flyout を大きく（`scale = 2.5`、中央）撮った（2026-11-15。Flyout の中に言語で変わる文字が無いので、英語と日本語は同じ画像）。Edge では、曲名・アーティスト・ジャケット（data: URL）を Media Session で渡すページを開く（file:// の mp3 を直接開くと曲名がファイル名になり、ジャケットも出ない）。
+
 | 順 | 英語 | 日本語 |
 | --- | --- | --- |
-| 1 | `en-1-flyout.png` | `ja-1-flyout.png` |
-| 2 | `en-2-settings.png` | `ja-2-settings.png` |
-| 3 | `en-3-new-track.png` | `ja-3-new-track.png` |
-| 4 | `en-4-light.png` | `ja-4-light.png` |
+| 1 | `en-1-closeup.png` | `ja-1-closeup.png` |
+| 2 | `en-2-flyout.png` | `ja-2-flyout.png` |
+| 3 | `en-3-settings.png` | `ja-3-settings.png` |
+| 4 | `en-4-new-track.png` | `ja-4-new-track.png` |
+| 5 | `en-5-light.png` | `ja-5-light.png` |
 
 キャプション（「イメージの字幕の追加」、200 文字まで）は、各言語の TOML ファイルにある。
 

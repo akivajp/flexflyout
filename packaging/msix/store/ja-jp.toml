@@ -62,17 +62,21 @@ developed_by = "Akiva Miura"
 # workflow runs with images = true.
 
 [[screenshots]]
-file = "screenshots/ja-1-flyout.png"
+file = "screenshots/ja-1-closeup.png"
 caption = "音量を変えると、再生中の曲を操作ボタンと音量と一緒に表示"
 
 [[screenshots]]
-file = "screenshots/ja-2-settings.png"
+file = "screenshots/ja-2-flyout.png"
+caption = "画面の隅に重ねて表示し、数秒で消える"
+
+[[screenshots]]
+file = "screenshots/ja-3-settings.png"
 caption = "表示するモニター・位置・大きさ・表示時間・見た目を自由に"
 
 [[screenshots]]
-file = "screenshots/ja-3-new-track.png"
+file = "screenshots/ja-4-new-track.png"
 caption = "新しい曲は小さな表示で。クリックで全体を表示"
 
 [[screenshots]]
-file = "screenshots/ja-4-light.png"
+file = "screenshots/ja-5-light.png"
 caption = "明るい色・暗い色。Windows に合わせることも"
