@@ -49,7 +49,10 @@ pub fn run(config_file: PathBuf, lang: Option<String>) -> anyhow::Result<()> {
             .with_title(fl!(state.loader, "settings-title"))
             .with_inner_size([480.0, 620.0])
             .with_min_inner_size([400.0, 320.0])
-            .with_icon(icon()),
+            .with_icon(icon())
+            // The name of the desktop entry, so that Wayland desktops (KDE
+            // Plasma) show its icon for the window instead of a generic one.
+            .with_app_id("flexflyout"),
         ..Default::default()
     };
     eframe::run_native(

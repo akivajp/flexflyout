@@ -7,6 +7,10 @@ include breaking changes).
 
 ## [Unreleased]
 
+### Fixed
+- The settings window showed a generic "W" icon on Wayland desktops such as
+  KDE Plasma; it now shows FlexFlyout's icon.
+
 ## [0.11.0] - 2026-11-13
 
 ### Added
