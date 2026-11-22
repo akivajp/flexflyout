@@ -82,10 +82,12 @@ animation = "slide"
 
 [appearance]
 # "dark" or "light" colors, or "system" to follow the system's light or dark
-# mode (Windows' mode, or the desktop's color scheme on Linux).
+# mode (Windows' mode, or the desktop's color scheme on Linux; on KDE Plasma
+# the panel takes the color scheme's very colors).
 theme = "dark"
 
-# Color of the bars and of the buttons that are on, as "#rrggbb".
+# Color of the bars and of the buttons that are on, as "#rrggbb", or "system"
+# for the system's accent color (Windows', or the desktop's on Linux).
 accent = "#5aa0ff"
 
 # Roundness of the panel's corners, from 0 (square) to 32.

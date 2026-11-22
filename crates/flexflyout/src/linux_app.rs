@@ -102,11 +102,17 @@ pub fn run(
         })
         .map_err(|err| anyhow::anyhow!("cannot receive messages: {err}"))?;
     quit_on_signals(sender.clone());
-    // The desktop's color scheme, for the theme that follows it.
-    let to_flyout = sender.clone();
-    theme::spawn(move |theme| {
-        let _ = to_flyout.send(Message::SystemTheme(theme));
-    });
+    // The desktop's color scheme and colors, for the theme and the accent
+    // that follow it.
+    let (to_flyout, colors_to_flyout) = (sender.clone(), sender.clone());
+    theme::spawn(
+        move |theme| {
+            let _ = to_flyout.send(Message::SystemTheme(theme));
+        },
+        move |colors| {
+            let _ = colors_to_flyout.send(Message::DesktopColors(colors));
+        },
+    );
 
     let ctx = egui::Context::default();
     ctx.options_mut(|options| options.zoom_with_keyboard = false);

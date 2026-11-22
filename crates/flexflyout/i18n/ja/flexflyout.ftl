@@ -72,6 +72,7 @@ settings-theme-light = ライト
 settings-theme-system = システムに合わせる
 settings-accent = アクセントの色
 settings-accent-default = 既定の色
+settings-accent-system = OS の色
 settings-corner-radius = 角の丸み
 settings-parts = 表示する部品
 settings-show-cover-art = ジャケット

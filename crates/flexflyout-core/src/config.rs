@@ -134,7 +134,8 @@ pub const MAX_CORNER_RADIUS: u8 = 32;
 pub struct Appearance {
     /// Dark or light colors.
     pub theme: Theme,
-    /// Color of the bars and of the buttons that are on, as `#rrggbb`.
+    /// Color of the bars and of the buttons that are on, as `#rrggbb`, or
+    /// [`SYSTEM_ACCENT`] for the desktop's accent color.
     pub accent: String,
     /// Roundness of the panel's corners, in points (0 = square).
     pub corner_radius: u8,
@@ -165,14 +166,73 @@ impl Default for Appearance {
 /// The default accent color.
 pub const DEFAULT_ACCENT: &str = "#5aa0ff";
 
+/// The accent setting that follows the desktop's accent color (where the
+/// desktop tells it; elsewhere the default color is used).
+pub const SYSTEM_ACCENT: &str = "system";
+
 impl Appearance {
     /// The accent color's red, green and blue (the default one if the
-    /// setting cannot be read).
+    /// setting cannot be read, or follows the desktop).
     pub fn accent_rgb(&self) -> (u8, u8, u8) {
         parse_rgb(&self.accent)
             .or_else(|| parse_rgb(DEFAULT_ACCENT))
             .unwrap_or((90, 160, 255))
     }
+
+    /// Whether the accent color is the desktop's.
+    pub fn accent_follows_system(&self) -> bool {
+        self.accent.trim().eq_ignore_ascii_case(SYSTEM_ACCENT)
+    }
+
+    /// The accent color to draw with on a `theme` panel (dark or light):
+    /// the desktop's when the setting follows it and the desktop tells it,
+    /// else [`Self::accent_rgb`].
+    pub fn accent_with(&self, desktop: &DesktopColors, theme: Theme) -> (u8, u8, u8) {
+        match desktop.accent_for(theme) {
+            Some(accent) if self.accent_follows_system() => accent,
+            _ => self.accent_rgb(),
+        }
+    }
+}
+
+/// A color's red, green and blue.
+pub type Rgb = (u8, u8, u8);
+
+/// Colors the desktop tells, for the theme and the accent that follow the
+/// system (all `None` where it tells nothing).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct DesktopColors {
+    /// The windows' background (KDE's color scheme).
+    pub background: Option<Rgb>,
+    /// The windows' text (KDE's color scheme).
+    pub text: Option<Rgb>,
+    /// The accent color.
+    pub accent: Option<Rgb>,
+    /// The accent color for a light panel, where the desktop has a darker
+    /// shade of its own for it (Windows); else [`Self::accent`] is used.
+    pub accent_on_light: Option<Rgb>,
+}
+
+impl DesktopColors {
+    /// The panel's background and text when the theme follows the
+    /// desktop and it tells both.
+    pub fn panel(&self) -> Option<(Rgb, Rgb)> {
+        Some((self.background?, self.text?))
+    }
+
+    /// The accent color for a `theme` panel (dark or light).
+    pub fn accent_for(&self, theme: Theme) -> Option<Rgb> {
+        match theme {
+            Theme::Light => self.accent_on_light.or(self.accent),
+            Theme::Dark | Theme::System => self.accent,
+        }
+    }
+}
+
+/// Whether a color is light (its relative luminance is over half).
+pub fn is_light((r, g, b): Rgb) -> bool {
+    let luminance = 0.2126 * f32::from(r) + 0.7152 * f32::from(g) + 0.0722 * f32::from(b);
+    luminance > 127.5
 }
 
 /// Reads `#rrggbb` (the `#` may be left out).
@@ -195,7 +255,7 @@ pub enum Theme {
     /// Dark text on a light panel.
     Light,
     /// Dark or light as the system is set: Windows' mode, or the desktop's
-    /// color scheme on Linux.
+    /// color scheme on Linux (on KDE Plasma, its very colors).
     System,
 }
 
@@ -562,9 +622,9 @@ impl Config {
     /// Brings every value into its range, with a warning for each change.
     fn clamp(&mut self, warnings: &mut Vec<String>) {
         let appearance = &mut self.appearance;
-        if parse_rgb(&appearance.accent).is_none() {
+        if parse_rgb(&appearance.accent).is_none() && !appearance.accent_follows_system() {
             warnings.push(format!(
-                "`appearance.accent` = {:?} is not a color like \"#5aa0ff\"; using {DEFAULT_ACCENT}",
+                "`appearance.accent` = {:?} is not a color like \"#5aa0ff\" or \"system\"; using {DEFAULT_ACCENT}",
                 appearance.accent
             ));
             appearance.accent = DEFAULT_ACCENT.to_owned();
@@ -891,6 +951,54 @@ mod tests {
         assert_eq!(loaded.config.appearance.corner_radius, MAX_CORNER_RADIUS);
         assert_eq!(loaded.config.appearance.theme, Theme::Light);
         assert_eq!(loaded.warnings.len(), 2, "{:?}", loaded.warnings);
+    }
+
+    #[test]
+    fn the_accent_can_follow_the_desktop() {
+        let loaded = Config::parse("[appearance]\naccent = \"System\"\n").unwrap();
+        let appearance = &loaded.config.appearance;
+        assert!(loaded.warnings.is_empty(), "{:?}", loaded.warnings);
+        assert!(appearance.accent_follows_system());
+        // The desktop's color when it tells one, else the default.
+        let desktop = DesktopColors {
+            accent: Some((61, 174, 233)),
+            ..DesktopColors::default()
+        };
+        assert_eq!(
+            appearance.accent_with(&desktop, Theme::Dark),
+            (61, 174, 233)
+        );
+        assert_eq!(
+            appearance.accent_with(&DesktopColors::default(), Theme::Dark),
+            parse_rgb(DEFAULT_ACCENT).unwrap()
+        );
+        // A color of its own is kept even where the desktop tells one.
+        assert_eq!(
+            Appearance::default().accent_with(&desktop, Theme::Dark),
+            parse_rgb(DEFAULT_ACCENT).unwrap()
+        );
+        // A shade for light panels, where the desktop has one (Windows).
+        assert_eq!(
+            appearance.accent_with(&desktop, Theme::Light),
+            (61, 174, 233)
+        );
+        let shades = DesktopColors {
+            accent_on_light: Some((0, 103, 192)),
+            ..desktop
+        };
+        assert_eq!(appearance.accent_with(&shades, Theme::Light), (0, 103, 192));
+        assert_eq!(appearance.accent_with(&shades, Theme::Dark), (61, 174, 233));
+    }
+
+    #[test]
+    fn desktop_colors_tell_light_from_dark() {
+        assert!(is_light((239, 240, 241)));
+        assert!(!is_light((32, 35, 38)));
+        let half = DesktopColors {
+            background: Some((32, 35, 38)),
+            ..DesktopColors::default()
+        };
+        assert_eq!(half.panel(), None);
     }
 
     #[test]

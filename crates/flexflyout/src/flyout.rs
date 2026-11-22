@@ -7,7 +7,8 @@ use std::time::{Duration, Instant};
 
 use flexflyout_core::config::{Display, NewTrack};
 use flexflyout_core::{
-    Command, Config, FlyoutTimer, NewTrackShow, NowPlaying, PlaybackStatus, Player, Theme, Volume,
+    Command, Config, DesktopColors, FlyoutTimer, NewTrackShow, NowPlaying, PlaybackStatus, Player,
+    Theme, Volume,
 };
 use flexflyout_ui::{FlyoutView, Labels};
 
@@ -77,6 +78,9 @@ pub struct FlyoutState {
     /// The system's colors, dark or light, for the theme that follows them
     /// (dark until the system says otherwise).
     system_theme: Theme,
+    /// The desktop's own colors and accent, where it tells them (KDE
+    /// Plasma), for the theme and the accent that follow the system.
+    desktop_colors: DesktopColors,
     /// When the user last moved the position with the flyout's bar.
     seeked: Option<Instant>,
     /// The panel of the current (or last) appearance.
@@ -116,6 +120,7 @@ impl FlyoutState {
             volume: None,
             pinned: false,
             system_theme: Theme::Dark,
+            desktop_colors: DesktopColors::default(),
             seeked: None,
             mode: Mode::Full,
             players: Vec::new(),
@@ -168,6 +173,10 @@ impl FlyoutState {
             }
             Message::SystemTheme(theme) => {
                 self.system_theme = theme;
+                Received::Content
+            }
+            Message::DesktopColors(colors) => {
+                self.desktop_colors = colors;
                 Received::Content
             }
             Message::Players { players, current } => {
@@ -225,6 +234,16 @@ impl FlyoutState {
         after
     }
 
+    /// The system's dark or light: that of the desktop's own background
+    /// when it tells one, so that the two always agree.
+    fn system_theme(&self) -> Theme {
+        match self.desktop_colors.panel() {
+            Some((background, _)) if flexflyout_core::config::is_light(background) => Theme::Light,
+            Some(_) => Theme::Dark,
+            None => self.system_theme,
+        }
+    }
+
     /// What to draw at `now`.
     pub fn view(&self, now: Instant) -> FlyoutView<'_> {
         FlyoutView {
@@ -234,7 +253,8 @@ impl FlyoutState {
             now,
             background_opacity: self.config.display.opacity,
             appearance: &self.config.appearance,
-            theme: self.config.appearance.theme.resolved(self.system_theme),
+            theme: self.config.appearance.theme.resolved(self.system_theme()),
+            desktop: self.desktop_colors,
             labels: &self.labels,
             players: &self.players,
             player_choice: self.config.general.player(),

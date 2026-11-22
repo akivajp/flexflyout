@@ -685,7 +685,7 @@ impl SettingsWindow {
 
     /// Colors, corners and the parts of the flyout to show.
     fn appearance(&mut self, ui: &mut egui::Ui) {
-        use flexflyout_core::config::{DEFAULT_ACCENT, MAX_CORNER_RADIUS};
+        use flexflyout_core::config::{DEFAULT_ACCENT, MAX_CORNER_RADIUS, SYSTEM_ACCENT};
         use flexflyout_core::{Appearance, Theme};
 
         let loader = &self.loader;
@@ -717,21 +717,38 @@ impl SettingsWindow {
 
                 ui.label(fl!(loader, "settings-accent"));
                 ui.horizontal(|ui| {
-                    let (r, g, b) = appearance.accent_rgb();
-                    let mut rgb = [r, g, b];
-                    if ui.color_edit_button_srgb(&mut rgb).changed() {
-                        appearance.accent = format!("#{:02x}{:02x}{:02x}", rgb[0], rgb[1], rgb[2]);
-                    }
-                    let is_default = appearance.accent_rgb() == Appearance::default().accent_rgb();
+                    // The desktop's accent (Windows' or the Linux
+                    // desktop's); the color button is then off.
+                    let mut system = appearance.accent_follows_system();
                     if ui
-                        .add_enabled(
-                            !is_default,
-                            egui::Button::new(fl!(loader, "settings-accent-default")),
-                        )
-                        .clicked()
+                        .checkbox(&mut system, fl!(loader, "settings-accent-system"))
+                        .changed()
                     {
-                        appearance.accent = DEFAULT_ACCENT.to_owned();
+                        appearance.accent = if system {
+                            SYSTEM_ACCENT.to_owned()
+                        } else {
+                            DEFAULT_ACCENT.to_owned()
+                        };
                     }
+                    ui.add_enabled_ui(!appearance.accent_follows_system(), |ui| {
+                        let (r, g, b) = appearance.accent_rgb();
+                        let mut rgb = [r, g, b];
+                        if ui.color_edit_button_srgb(&mut rgb).changed() {
+                            appearance.accent =
+                                format!("#{:02x}{:02x}{:02x}", rgb[0], rgb[1], rgb[2]);
+                        }
+                        let is_default =
+                            appearance.accent_rgb() == Appearance::default().accent_rgb();
+                        if ui
+                            .add_enabled(
+                                !is_default,
+                                egui::Button::new(fl!(loader, "settings-accent-default")),
+                            )
+                            .clicked()
+                        {
+                            appearance.accent = DEFAULT_ACCENT.to_owned();
+                        }
+                    });
                 });
                 ui.end_row();
 

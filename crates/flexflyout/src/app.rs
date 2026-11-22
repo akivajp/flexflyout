@@ -302,9 +302,13 @@ impl FlyoutApp {
             let placement = placement.clone();
             move |message: Message| send(&sender, &ctx, raw, &placement, message, show_via_egui)
         };
-        // The light or dark mode, for the theme that follows it.
-        let to_window = send.clone();
-        theme::spawn(move |theme| to_window(Message::SystemTheme(theme)));
+        // The light or dark mode and the accent color, for the theme and
+        // the accent that follow them.
+        let (to_window, colors_to_window) = (send.clone(), send.clone());
+        theme::spawn(
+            move |theme| to_window(Message::SystemTheme(theme)),
+            move |colors| colors_to_window(Message::DesktopColors(colors)),
+        );
         // Read by the player's thread, which decides whether to show.
         let show_on_play_pause = Arc::new(AtomicBool::new(config.general.show_on_play_pause));
         let reload = watch_settings(&options, &config, &show_on_play_pause, send.clone());
@@ -545,6 +549,7 @@ fn send(
         Message::NowPlaying(_)
         | Message::Volume(_)
         | Message::SystemTheme(_)
+        | Message::DesktopColors(_)
         | Message::Players { .. }
         | Message::Quit => false,
     };

@@ -72,6 +72,7 @@ settings-theme-light = Light
 settings-theme-system = Same as the system
 settings-accent = Accent color
 settings-accent-default = Default
+settings-accent-system = The system's
 settings-corner-radius = Rounded corners
 settings-parts = Show
 settings-show-cover-art = Cover art

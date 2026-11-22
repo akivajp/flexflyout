@@ -16,7 +16,8 @@ use egui::{
     Shape, Stroke, StrokeKind, TextureHandle, TextureOptions, Ui, WidgetInfo, pos2, vec2,
 };
 use flexflyout_core::{
-    Appearance, Command, Cover, NowPlaying, PlaybackStatus, Player, RepeatMode, Theme, Volume,
+    Appearance, Command, Cover, DesktopColors, NowPlaying, PlaybackStatus, Player, RepeatMode,
+    Theme, Volume,
 };
 
 /// Size of the panel at scale 1.0, in egui points, with the parts the
@@ -55,7 +56,7 @@ pub fn compact_size(appearance: &Appearance) -> egui::Vec2 {
 pub fn draw_compact(ui: &mut Ui, view: &FlyoutView<'_>) -> Option<Command> {
     let rect = ui.max_rect();
     let appearance = view.appearance;
-    let colors = Palette::new(appearance, view.theme);
+    let colors = Palette::new(appearance, view.theme, &view.desktop);
     let painter = ui.painter().clone();
     let alpha = (view.background_opacity.clamp(0.0, 1.0) * 255.0).round() as u8;
     let background = Color32::from_rgba_unmultiplied(
@@ -183,6 +184,10 @@ pub struct FlyoutView<'a> {
     /// The colors to draw in, dark or light: the settings' theme, with
     /// [`Theme::System`] already turned into the system's.
     pub theme: Theme,
+    /// The desktop's colors: the panel's own with [`Theme::System`] when
+    /// it tells them (KDE Plasma), and the accent when the settings follow
+    /// the desktop's.
+    pub desktop: DesktopColors,
     /// Translated texts.
     pub labels: &'a Labels,
     /// The players there are, to choose from.
@@ -239,10 +244,16 @@ struct Palette {
 
 impl Palette {
     /// The colors of `theme` (dark unless it is light), with the accent
-    /// color of `appearance`.
-    fn new(appearance: &Appearance, theme: Theme) -> Self {
-        let (r, g, b) = appearance.accent_rgb();
+    /// color of `appearance`. When the settings follow the system and the
+    /// desktop tells its colors, the panel is drawn in those instead.
+    fn new(appearance: &Appearance, theme: Theme, desktop: &DesktopColors) -> Self {
+        let (r, g, b) = appearance.accent_with(desktop, theme);
         let accent = Color32::from_rgb(r, g, b);
+        if appearance.theme == Theme::System
+            && let Some((background, text)) = desktop.panel()
+        {
+            return Self::from_desktop(background, text, accent);
+        }
         match theme {
             Theme::Dark | Theme::System => Self {
                 background: Color32::from_rgb(28, 28, 34),
@@ -272,6 +283,36 @@ impl Palette {
                 button_hovered: Color32::from_rgba_premultiplied(0, 0, 0, 28),
                 button_pressed: Color32::from_rgba_premultiplied(0, 0, 0, 46),
             },
+        }
+    }
+
+    /// The desktop's background and text, with the in-between colors mixed
+    /// from them (in the same proportions as the built-in themes), so that
+    /// the panel looks like the desktop's own popups.
+    fn from_desktop(background: (u8, u8, u8), text: (u8, u8, u8), accent: Color32) -> Self {
+        let rgb = |(r, g, b): (u8, u8, u8)| Color32::from_rgb(r, g, b);
+        let (bg, fg) = (rgb(background), rgb(text));
+        // `t` of the way from the background to the text.
+        let mix = |t: f32| bg.lerp_to_gamma(fg, t);
+        // The buttons are the text's color, faintly, as in the built-in
+        // themes (white on dark, black on light).
+        let light = flexflyout_core::config::is_light(background);
+        let veil = |alpha: u8| {
+            let shade = if light { 0 } else { alpha };
+            Color32::from_rgba_premultiplied(shade, shade, shade, alpha)
+        };
+        Self {
+            background: bg,
+            cover_placeholder: mix(0.15),
+            text: fg,
+            secondary: mix(0.72),
+            disabled: mix(0.3),
+            bar_track: mix(0.2),
+            muted: mix(0.45),
+            accent,
+            button_idle: veil(if light { 14 } else { 20 }),
+            button_hovered: veil(if light { 28 } else { 40 }),
+            button_pressed: veil(if light { 46 } else { 64 }),
         }
     }
 }
@@ -366,7 +407,7 @@ pub fn draw(ui: &mut Ui, view: &FlyoutView<'_>) -> Option<Command> {
     let painter = ui.painter().clone();
     let labels = view.labels;
     let appearance = view.appearance;
-    let colors = Palette::new(appearance, view.theme);
+    let colors = Palette::new(appearance, view.theme, &view.desktop);
     let mut command = None;
 
     // Rounded background. Its alpha comes from the settings only.
@@ -1407,6 +1448,7 @@ mod tests {
                         background_opacity: 0.9,
                         appearance,
                         theme: appearance.theme.resolved(Theme::Dark),
+                        desktop: DesktopColors::default(),
                         labels,
                         players: &PLAYERS,
                         player_choice: None,
@@ -1478,6 +1520,7 @@ mod tests {
                         background_opacity: 0.9,
                         appearance: &DEFAULT,
                         theme: Theme::Dark,
+                        desktop: DesktopColors::default(),
                         labels: &labels,
                         players: &[],
                         player_choice: None,
@@ -1643,6 +1686,7 @@ mod tests {
                         background_opacity: 0.9,
                         appearance: &DEFAULT,
                         theme: Theme::Light,
+                        desktop: DesktopColors::default(),
                         labels: &labels,
                         players: &[],
                         player_choice: None,

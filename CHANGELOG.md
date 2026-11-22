@@ -7,6 +7,14 @@ include breaking changes).
 
 ## [Unreleased]
 
+### Added
+- On KDE Plasma, the theme that follows the system ("Same as the system")
+  now takes the color scheme's own colors (from `kdeglobals`), so the flyout
+  matches Plasma's popups, and follows a change of the color scheme at once.
+- `appearance.accent = "system"` (the settings window's "The system's"
+  check box): the accent color of Windows (in the shade Windows' own flyouts
+  use on a dark or light panel) or of the Linux desktop.
+
 ### Fixed
 - The settings window showed a generic "W" icon on Wayland desktops such as
   KDE Plasma; it now shows FlexFlyout's icon.

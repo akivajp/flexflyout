@@ -3,7 +3,7 @@
 
 use std::time::Instant;
 
-use flexflyout_core::{Config, NowPlaying, Player, Theme, Volume};
+use flexflyout_core::{Config, DesktopColors, NowPlaying, Player, Theme, Volume};
 use flexflyout_ui::Labels;
 
 /// What the sources send to the window.
@@ -16,6 +16,9 @@ pub enum Message {
     /// The system's colors changed (dark or light), or were read for the
     /// first time.
     SystemTheme(Theme),
+    /// The desktop's own colors or accent changed, or were read for the
+    /// first time (KDE Plasma's colors, or Windows' accent).
+    DesktopColors(DesktopColors),
     /// The players there are, and the one whose track is shown (its ID).
     Players {
         players: Vec<Player>,

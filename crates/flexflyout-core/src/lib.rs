@@ -14,7 +14,7 @@ pub mod layout;
 mod timer;
 pub mod update;
 
-pub use config::{Appearance, Config, NewTrackShow, Theme};
+pub use config::{Appearance, Config, DesktopColors, NewTrackShow, Theme};
 pub use timer::{FlyoutTimer, Timing};
 
 /// Playback state reported by the media player.
