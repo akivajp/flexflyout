@@ -27,14 +27,14 @@ FlexFlyout lives in the notification area, and its settings window shows each ch
 
 FlexFlyout is free and open source (MIT or Apache 2.0): https://github.com/akivajp/flexflyout'''
 # "What's new in this version": rewrite for each release.
-release_notes = "Adds a native package for Windows on Arm (ARM64); nothing changes on x64 PCs."
+release_notes = "The accent color can now follow Windows' accent color (the settings window's \"The system's\" check box)."
 features = [
   "Shows the playing track, playback controls and the volume when you change the volume or press a media key",
   "A small panel for each new track",
   "Choose the monitor: primary, under the mouse pointer, or a specific one",
   "Nine anchor points plus pixel offsets",
   "Adjustable size, display time and opacity",
-  "Light or dark (or following Windows), accent color, corner roundness",
+  "Light or dark (or following Windows), accent color (yours or Windows'), corner roundness",
   "Keep Windows' volume indicator (placed clear of it) or hide it",
   "Follow one player only",
   "Stays off full-screen games on that monitor",
