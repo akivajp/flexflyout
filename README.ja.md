@@ -43,6 +43,12 @@ ARM64 版は、CI が ARM64 のマシンでビルドして起動（デモ）ま�
 
 [Microsoft Store](https://apps.microsoft.com/detail/9p6kdqx7jzs4) から入れられます。署名済みで SmartScreen の警告が出ず、更新も Store が届けます。Store から入れた場合、設定とログは専用のフォルダー（`%LOCALAPPDATA%\Packages\C2B504BA.FlexFlyout_1raghr5p0ryyw\LocalState`）に置かれ、アンインストールすると消えます。
 
+Store の版は、コマンドラインから winget でも入れられます。
+
+```powershell
+winget install flexflyout
+```
+
 または、[Scoop](https://scoop.sh) で [akivajp のバケット](https://github.com/akivajp/scoop-bucket) から入れると、スタートメニューにも追加されます（`scoop update flexflyout` で更新できます。先にタスクトレイのアイコンから FlexFlyout を終了してください）。
 
 ```powershell
@@ -59,7 +65,7 @@ FlexFlyout は通知領域（タスクトレイ）で動き、アイコンにマ
 ### アンインストール
 
 1. タスクトレイのメニューで **Windows の起動時に開始** を外し、FlexFlyout を終了します（Scoop の場合は自動で外れます）。
-2. Store から入れた場合はほかのアプリと同じようにアンインストールし、Scoop の場合は `scoop uninstall flexflyout` を実行し、zip の場合は展開したフォルダーを消します。
+2. Store（winget）から入れた場合はほかのアプリと同じようにアンインストール（または `winget uninstall flexflyout`）し、Scoop の場合は `scoop uninstall flexflyout` を実行し、zip の場合は展開したフォルダーを消します。
 3. 必要なら、設定とログも消します: `%APPDATA%\flexflyout` と `%LOCALAPPDATA%\flexflyout`。
 
 Windows 標準の音量表示を消す設定にしていた場合も、FlexFlyout を終了すれば元に戻ります。

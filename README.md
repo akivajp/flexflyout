@@ -43,6 +43,12 @@ The ARM64 builds are built and started (the demo) on ARM64 machines by the CI, b
 
 From the [Microsoft Store](https://apps.microsoft.com/detail/9p6kdqx7jzs4): signed, no SmartScreen warning, and the Store keeps it up to date. Installed from the Store, FlexFlyout keeps its settings and log in its own folder (`%LOCALAPPDATA%\Packages\C2B504BA.FlexFlyout_1raghr5p0ryyw\LocalState`), which uninstalling removes.
 
+The Store version also installs from the command line with winget:
+
+```powershell
+winget install flexflyout
+```
+
 Or with [Scoop](https://scoop.sh), from the [akivajp bucket](https://github.com/akivajp/scoop-bucket), which also adds FlexFlyout to the Start menu (`scoop update flexflyout` updates it; quit FlexFlyout from its tray icon first):
 
 ```powershell
@@ -59,7 +65,7 @@ FlexFlyout runs in the notification area (the tray); its icon's tooltip shows th
 ### Uninstall
 
 1. Turn **Start with Windows** off in the tray menu and quit FlexFlyout (Scoop turns it off for you).
-2. Remove it: uninstall it like any app from the Store, `scoop uninstall flexflyout`, or delete the folder you extracted the zip to.
+2. Remove it: uninstall it like any app from the Store (or `winget uninstall flexflyout`), `scoop uninstall flexflyout`, or delete the folder you extracted the zip to.
 3. Delete the settings and the log, if you like: `%APPDATA%\flexflyout` and `%LOCALAPPDATA%\flexflyout`.
 
 If you hid the Windows volume indicator, it comes back when FlexFlyout quits.
